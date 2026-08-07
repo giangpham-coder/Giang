@@ -1,31 +1,32 @@
 name: Sync Wayfair Data
-
+ 
 on:
   schedule:
     - cron: '0 7 * * *'   # 07:00 UTC = 14:00 (2h chieu) gio VN, moi ngay
   workflow_dispatch: {}    # cho phep bam "Run workflow" chay tay tren GitHub
-
+ 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
+ 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
+ 
       - name: Install dependencies
         run: pip install gspread google-auth supabase
-
+ 
       - name: Write Google service account key to file
-        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
-
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' | base64 -d > service_account.json
+ 
       - name: Run sync
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: service_account.json
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python sync_google_sheet.py
+ 
