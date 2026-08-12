@@ -54,6 +54,23 @@ def _to_float(value):
 _SHEET_ERROR_TOKENS = ("#REF!", "#ERROR!", "#N/A", "#VALUE!", "#NAME?", "#NULL!", "#DIV/0!", "Loading...")
 
 
+def _normalize_month(month_str):
+    """Chuan hoa 'M/YYYY' hoac 'M/YY' ve dang 'YYYY-MM' de cac tab khac nhau
+    (Ads dung M/YYYY, Return dung M/YY) khop duoc voi nhau."""
+    if not month_str:
+        return None
+    try:
+        parts = month_str.strip().split("/")
+        if len(parts) != 2:
+            return None
+        m, y = int(parts[0]), int(parts[1])
+        if y < 100:
+            y += 2000
+        return f"{y:04d}-{m:02d}"
+    except (ValueError, IndexError):
+        return None
+
+
 def _parse_us_date_to_iso(date_str):
     """Chuyen 'M/D/YYYY' (dang text tu sheet) sang 'YYYY-MM-DD' de Postgres
     sort/filter dung kieu ngay. Tra ve None neu khong parse duoc."""
@@ -454,7 +471,7 @@ def sync_returns(sh):
         if not product_id:
             continue
         records.append({
-            "month": get(row, "month") or None,
+            "month": _normalize_month(get(row, "month")),
             "product_name": get(row, "product_name"),
             "product_id": product_id,
             "wayfair_sku": get(row, "wayfair_sku"),
@@ -464,6 +481,30 @@ def sync_returns(sh):
             "total_deduction": _to_float(get(row, "total_deduction")),
             "class_name": get(row, "class_name"),
             "last_delivery_date": get(row, "last_delivery_date"),
+        })
+    return records
+
+
+# ============================================================
+# freight_monthly <- tab "Freight" (Transportation + Fulfillment CastleGate)
+# ============================================================
+def sync_freight(sh):
+    ws = sh.worksheet("Freight")
+    rows = ws.get_all_values()
+    records = []
+    for row in rows[1:]:
+        if _row_has_error(row):
+            continue
+        if len(row) < 3:
+            continue
+        month = _normalize_month(row[0].strip())
+        charge_type = row[1].strip()
+        if not month or not charge_type:
+            continue
+        records.append({
+            "month": month,
+            "charge_type": charge_type,
+            "charge_amount": _to_float(row[2]),
         })
     return records
 
@@ -511,7 +552,7 @@ def sync_ads_monthly(sh):
         if not asin or asin.upper() == "GRAND TOTAL":
             continue
         records.append({
-            "month": get(row, "month") or None,
+            "month": _normalize_month(get(row, "month")),
             "asin": asin,
             "product_name": get(row, "product_name"),
             "product_group": get(row, "product_group"),
@@ -568,6 +609,7 @@ def main():
     upsert(supabase, "forecast", sync_forecast(sh), "part_number", dedupe_keys=None)
     upsert(supabase, "ads_monthly", sync_ads_monthly(sh), "asin", dedupe_keys=None)
     upsert(supabase, "returns_monthly", sync_returns(sh), "product_id", dedupe_keys=None)
+    upsert(supabase, "freight_monthly", sync_freight(sh), "month", dedupe_keys=None)
 
 
 if __name__ == "__main__":
