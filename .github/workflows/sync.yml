@@ -2,8 +2,8 @@ name: Sync Wayfair Data
 
 on:
   schedule:
-    - cron: '30 1 * * *'   # 01:30 UTC = 08:30 sang gio VN. Keo don WF -> sheet, roi sync sheet -> web (1 lan, tuan tu).
-  workflow_dispatch: {}    # cho phep bam "Run workflow" chay tay
+    - cron: '0 1 * * *'   # 01:00 UTC = 08:00 sang gio VN
+  workflow_dispatch: {}   # cho phep bam "Run workflow" chay tay
 
 jobs:
   sync:
@@ -11,21 +11,17 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install gspread google-auth supabase requests python-dotenv
-
       - name: Write Google service account key to file
         run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' | base64 -d > service_account.json
-
       # BUOC 1: keo don Wayfair API (CG + DS) cua hom qua -> tab Orders
       - name: Pull Wayfair orders into Sheet
-        continue-on-error: true          # loi keo don khong lam chet buoc sync web
+        continue-on-error: true
         env:
           WF_ENV: production
           WF_CLIENT_ID: ${{ secrets.WF_CLIENT_ID }}
@@ -35,8 +31,7 @@ jobs:
           GOOGLE_SERVICE_ACCOUNT_FILE: service_account.json
           WF_PUSH_SUPABASE: "0"
         run: python wayfair_orders_sync.py
-
-      # BUOC 2: sync tab Orders -> Supabase -> web (sync cu cua ban, giu nguyen)
+      # BUOC 2: sync tab Orders -> Supabase -> web
       - name: Sync Sheet to web
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: service_account.json
