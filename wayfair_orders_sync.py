@@ -200,11 +200,43 @@ query {root_field}($limit: Int32, $hasResponse: Boolean, $fromDate: IsoDateTime,
 """
 
 
+_TRANSIENT_HTTP = {429, 500, 502, 503, 504}
+
+
+def _is_transient(e: Exception) -> bool:
+    try:
+        if isinstance(e, gspread.exceptions.APIError):
+            return e.response.status_code in _TRANSIENT_HTTP
+    except Exception:
+        pass
+    if isinstance(e, requests.exceptions.RequestException):
+        resp = getattr(e, "response", None)
+        return (resp.status_code in _TRANSIENT_HTTP) if resp is not None else True
+    return False
+
+
+def _retry(label: str, fn, tries: int = 4, base_delay: int = 5):
+    """Thu lai khi gap loi tam thoi (503/429/5xx, timeout...). Loi khac -> raise ngay."""
+    for attempt in range(1, tries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt < tries and _is_transient(e):
+                wait = base_delay * attempt
+                print(f"[retry] {label}: loi tam thoi ({type(e).__name__}), thu lai sau {wait}s ({attempt}/{tries - 1})")
+                time.sleep(wait)
+                continue
+            raise
+
+
 def gql(token: str, query: str, variables: dict) -> Any:
-    r = requests.post(GRAPHQL_URL, json={"query": query, "variables": variables},
-                      headers={"Authorization": f"Bearer {token}",
-                               "Content-Type": "application/json"}, timeout=45)
-    r.raise_for_status()
+    def _do():
+        r = requests.post(GRAPHQL_URL, json={"query": query, "variables": variables},
+                          headers={"Authorization": f"Bearer {token}",
+                                   "Content-Type": "application/json"}, timeout=45)
+        r.raise_for_status()   # 5xx -> HTTPError (transient) -> se retry
+        return r
+    r = _retry("wayfair gql", _do)
     body = r.json()
     if body.get("errors"):
         raise RuntimeError(f"GraphQL errors: {json.dumps(body['errors'])[:600]}")
@@ -260,8 +292,7 @@ def to_rows(pos: list[dict], source: str) -> list[dict]:
         else:
             store_name = "Wayfair.ca" if _is_ca else "Wayfair"
         for p in (po.get("products") or []):
-            if p.get("isCancelled"):
-                continue
+            is_cancelled = bool(p.get("isCancelled"))   # chi co o production
             qty = _num(p.get("quantity") or 0)
             price = _num(p.get("price") or 0)
             revenue = _num(p["totalCost"]) if p.get("totalCost") is not None else _num(float(qty) * float(price))
@@ -274,7 +305,7 @@ def to_rows(pos: list[dict], source: str) -> list[dict]:
                 "po_date_display": _mdy(po.get("poDate", ""), pad=False),
                 "must_ship_display": _mdy(po.get("estimatedShipDate", ""), pad=True),
                 "backorder_date": "",
-                "order_status": "",
+                "order_status": "Cancelled" if is_cancelled else "New",
                 "item_number": p.get("partNumber", "") or "",
                 "item_name": p.get("name", "") or "",
                 "quantity": qty,
@@ -333,13 +364,16 @@ def write_sheet(rows: list[dict]) -> None:
     """CHI CHEN dong moi xuong duoi (khong xoa/ghi de). Revenue = cong thuc =Qty*WholesalePrice."""
     _need(SHEET_ID, "GOOGLE_SHEET_ID")
     gc = sheet_client()
-    sh = gc.open_by_key(SHEET_ID)
-    try:
-        ws = sh.worksheet(SHEET_TAB)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=SHEET_TAB, rows=5000, cols=max(30, len(DEFAULT_HEADERS)))
+    sh = _retry("mo sheet", lambda: gc.open_by_key(SHEET_ID))
 
-    existing = ws.get_all_values()
+    def _open_tab():
+        try:
+            return sh.worksheet(SHEET_TAB)
+        except gspread.WorksheetNotFound:
+            return sh.add_worksheet(title=SHEET_TAB, rows=5000, cols=max(30, len(DEFAULT_HEADERS)))
+    ws = _retry("mo tab", _open_tab)
+
+    existing = _retry("doc sheet", lambda: ws.get_all_values())
     header_exists = bool(existing and any(c.strip() for c in existing[0]))
     header = existing[0] if header_exists else DEFAULT_HEADERS
     data = existing[1:] if header_exists else []
@@ -374,7 +408,7 @@ def write_sheet(rows: list[dict]) -> None:
             aligned[rev_idx] = f"={_col_letter(qty_idx)}{abs_row}*{_col_letter(price_idx)}{abs_row}"
         matrix.append(aligned)
 
-    ws.update(values=matrix, range_name=f"A{start_row}", value_input_option="USER_ENTERED")
+    _retry("ghi sheet", lambda: ws.update(values=matrix, range_name=f"A{start_row}", value_input_option="USER_ENTERED"))
     print(f"[sheet] '{SHEET_TAB}': CHEN THEM {len(new)} dong (tu dong {first_data_row}), giu nguyen data cu")
 
 
@@ -408,14 +442,27 @@ def push_supabase(rows: list[dict]) -> None:
 # ─────────────────────────────────────────────────────────────
 # MAIN
 # ─────────────────────────────────────────────────────────────
+def safe_fetch(token: str, root_field: str, start: dt.datetime, end: dt.datetime) -> list[dict]:
+    """Neu endpoint chua duoc cap quyen tren app -> bo qua, khong lam sap ca lan chay."""
+    try:
+        return fetch_day(token, root_field, start, end)
+    except RuntimeError as e:
+        msg = str(e)
+        if "Cannot query field" in msg or "Did you mean" in msg:
+            print(f"[warn] '{root_field}' chua duoc bat tren app nay -> BO QUA. "
+                  f"(Can xin quyen {('CastleGate' if 'CastleGate' in root_field else 'Dropship')} Orders API cho app production.)")
+            return []
+        raise
+
+
 def main() -> None:
     start, end = target_window()
     print(f"[run] env={ENV} | lay don UTC ngay {start.date()} (khung [{start} , {end}))")
 
     token = get_token()
-    cg = fetch_day(token, "getCastleGatePurchaseOrders", start, end)
+    cg = safe_fetch(token, "getCastleGatePurchaseOrders", start, end)
     time.sleep(3.0)
-    ds = fetch_day(token, "getDropshipPurchaseOrders", start, end)
+    ds = safe_fetch(token, "getDropshipPurchaseOrders", start, end)
 
     rows = to_rows(cg, "castlegate") + to_rows(ds, "dropship")
     print(f"[flatten] tong {len(rows)} line items")
