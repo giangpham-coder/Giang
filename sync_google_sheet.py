@@ -1,486 +1,616 @@
-#!/usr/bin/env python3
 """
-wayfair_orders_sync.py
-----------------------
-Keo don Wayfair (CG + DS) cua NGAY HOM TRUOC (theo UTC) -> Google Sheet tab "Orders" -> Supabase.
+sync_google_sheet.py
+---------------------
+Doc nhieu tab tu Google Sheet "Giang Wf" va upsert vao Supabase.
+Cac bang duoc dong bo trong ban nay: products, pricing, supply_chain_stock,
+inbound, monthly_sales.
 
-Khung ngay: [hom_qua 00:00:00 UTC, hom_nay 00:00:00 UTC).
-  - Chay 01:30 UTC (= 08:30 sang VN) thi ngay hom truoc UTC da dong so (00:00 UTC = 07:00 VN).
-  - Don nao poDate da qua ngay moi UTC -> mai moi lay.
-  - Muon lay 1 ngay cu the: set WF_TARGET_DATE=YYYY-MM-DD (UTC).
+CHUA lam (can Giang xac nhan them):
+    - Forecast, Dat hang: cot la khoang ngay dong (rolling), can xu ly rieng
+    - INBOUND: chi dong bo "danh sach chinh" (Part Number/Active Date/Stage)
+      theo yeu cau cua Giang, chua dong bo bang chi tiet lot/invoice
 
-Sheet: dien theo TEN COT o dong header (dong 1) cua tab dich. Cot API khong co -> de trong.
-Supabase: upsert bang daily_orders cho dashboard.
+Cach chay:
+    pip install gspread google-auth supabase --break-system-packages
+    python sync_google_sheet.py
+
+Can chuan bi truoc (chua co = chua chay duoc):
+    1. GOOGLE_SERVICE_ACCOUNT_JSON -> duong dan file key .json cua service account
+    2. Share sheet "Giang Wf" cho email cua service account (quyen Viewer)
+    3. SUPABASE_URL, SUPABASE_KEY -> Supabase project settings > API
 """
 
 import os
 import re
-import sys
-import json
-import time
-import datetime as dt
-from typing import Any, Optional
-
-import requests
 import gspread
 from google.oauth2.service_account import Credentials
+from supabase import create_client
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
-    pass
+# ------------------------------ CONFIG ------------------------------
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"]
+SHEET_ID = "1L7fZWzg71BqqrnajCAwTP-10-946ryZDKHVqoiDvGb0"
 
-# ─────────────────────────────────────────────────────────────
-# CONFIG
-# ─────────────────────────────────────────────────────────────
-ENV = os.getenv("WF_ENV", "sandbox").lower()
-CLIENT_ID = os.getenv("WF_CLIENT_ID", "")
-CLIENT_SECRET = os.getenv("WF_CLIENT_SECRET", "")
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 
-WF_TARGET_DATE = os.getenv("WF_TARGET_DATE", "").strip()   # optional YYYY-MM-DD (UTC)
-PAGE_LIMIT = int(os.getenv("WF_PAGE_LIMIT", "25"))
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
-SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")
-SHEET_TAB = os.getenv("GOOGLE_SHEET_TAB", "Orders")        # dien thang vao tab Orders
-GSA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-GSA_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "")
-
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "daily_orders")
-PUSH_SUPABASE = os.getenv("WF_PUSH_SUPABASE", "1") == "1"
-
-if ENV == "production":
-    GRAPHQL_URL = "https://api.wayfair.com/v1/graphql"
-    OAUTH_AUDIENCE = "https://api.wayfair.com"
-else:
-    GRAPHQL_URL = "https://sandbox.api.wayfair.com/v1/graphql"
-    OAUTH_AUDIENCE = "https://sandbox.api.wayfair.com"
-
-OAUTH_URL = "https://sso.auth.wayfair.com/oauth/token"
-
-DEFAULT_HEADERS = [
-    "Revenue", "Warehouse Name", "Castlegate Rate", "Store Name", "PO Number",
-    "PO Date", "Must Ship By", "Backorder Date", "Order Status", "Item Number",
-    "Item Name", "Quantity", "Wholesale Price", "Ship Method", "Carrier Name",
-    "Shipping Account", "Ship To Name", "Ship To Address 1", "Ship To Address 2",
-    "Ship To City", "Ship To State", "Ship To Zip", "Ship To Country", "Customer Email",
-]
-
-HEADER_TO_KEY = {
-    "revenue": "revenue", "warehouse name": "warehouse_name",
-    "castlegate rate": "castlegate_rate", "store name": "store_name",
-    "po number": "po_number", "po date": "po_date_display",
-    "must ship by": "must_ship_display", "backorder date": "backorder_date",
-    "order status": "order_status", "item number": "item_number",
-    "item name": "item_name", "quantity": "quantity",
-    "wholesale price": "wholesale_price", "ship method": "ship_method",
-    "carrier name": "carrier_name", "shipping account": "shipping_account",
-    "ship to name": "ship_to_name",
-    "ship to address 1": "ship_to_address1", "ship to address": "ship_to_address1",
-    "ship to address1": "ship_to_address1",
-    "ship to address 2": "ship_to_address2", "ship to address2": "ship_to_address2",
-    "ship to city": "ship_to_city", "ship to state": "ship_to_state",
-    "ship to zip": "ship_to_zip", "ship to zip code": "ship_to_zip",
-    "ship to postal code": "ship_to_zip", "ship to country": "ship_to_country",
-    "customer email": "customer_email",
-}
-
-CARRIER_NAMES = {
-    "FDEG": "FedEx", "FDE": "FedEx", "FEDX": "FedEx", "FDEN": "FedEx",
-    "UPSN": "UPS", "UPSG": "UPS", "UPS": "UPS",
-    "USPS": "USPS", "ONTRAC": "OnTrac", "LASX": "LaserShip",
+_MONTH_MAP = {
+    "Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04", "May": "05", "Jun": "06",
+    "Jul": "07", "Aug": "08", "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12",
 }
 
 
-def _need(value: str, name: str) -> str:
-    if not value:
-        print(f"[config] THIEU bien '{name}'. Kiem tra file .env.", file=sys.stderr)
-        sys.exit(1)
-    return value
-
-
-def _norm(h: str) -> str:
-    return re.sub(r"\s+", " ", str(h).strip().lower())
-
-
-def _num(x):
-    return int(x) if float(x).is_integer() else round(float(x), 2)
-
-
-def _parse_dt(iso: str) -> Optional[dt.datetime]:
-    """Tra ve datetime NAIVE (coi nhu UTC)."""
-    if not iso:
+def _to_float(value):
+    if value in (None, "", "-"):
         return None
     try:
-        return dt.datetime.fromisoformat(str(iso).replace("Z", "+00:00").split(".")[0].split("+")[0])
-    except Exception:
+        cleaned = str(value).replace("$", "").replace(",", "").replace("%", "").strip()
+        return float(cleaned) if cleaned else None
+    except ValueError:
         return None
 
 
-def _iso_date(iso: str) -> str:
-    return (str(iso)[:10]) if iso else ""
+_SHEET_ERROR_TOKENS = ("#REF!", "#ERROR!", "#N/A", "#VALUE!", "#NAME?", "#NULL!", "#DIV/0!", "Loading...")
 
 
-def _mdy(iso: str, pad: bool) -> str:
-    d = _parse_dt(iso)
-    if not d:
-        return ""
-    return d.strftime("%m/%d/%Y") if pad else f"{d.month}/{d.day}/{d.year}"
-
-
-def _bump_iso(iso: str) -> str:
-    d = _parse_dt(iso) or dt.datetime.utcnow()
-    return (d + dt.timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-
-def target_window() -> tuple[dt.datetime, dt.datetime]:
-    """Tra ve (start, end) NAIVE UTC cho ngay can lay (mac dinh: hom qua UTC)."""
-    if WF_TARGET_DATE:
-        day = dt.date.fromisoformat(WF_TARGET_DATE)
-    else:
-        day = dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
-    start = dt.datetime(day.year, day.month, day.day)   # 00:00:00 UTC (naive)
-    return start, start + dt.timedelta(days=1)
-
-
-# ─────────────────────────────────────────────────────────────
-# 1. AUTH
-# ─────────────────────────────────────────────────────────────
-def get_token() -> str:
-    _need(CLIENT_ID, "WF_CLIENT_ID")
-    _need(CLIENT_SECRET, "WF_CLIENT_SECRET")
-    r = requests.post(OAUTH_URL, json={
-        "grant_type": "client_credentials", "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET, "audience": OAUTH_AUDIENCE,
-    }, headers={"Content-Type": "application/json"}, timeout=30)
-    r.raise_for_status()
-    print(f"[auth] token OK ({ENV})")
-    return r.json()["access_token"]
-
-
-# ─────────────────────────────────────────────────────────────
-# 2. GRAPHQL
-# ─────────────────────────────────────────────────────────────
-def products_fragment() -> str:
-    fields = ["partNumber", "sku", "name", "quantity", "price", "totalCost"]
-    if ENV == "production":
-        fields.append("isCancelled")
-    return "products { " + " ".join(fields) + " }"
-
-
-def build_query(root_field: str) -> str:
-    return f"""
-query {root_field}($limit: Int32, $hasResponse: Boolean, $fromDate: IsoDateTime, $poNumbers: [String], $sortOrder: SortOrder) {{
-  {root_field}(limit: $limit, hasResponse: $hasResponse, fromDate: $fromDate, poNumbers: $poNumbers, sortOrder: $sortOrder) {{
-    id
-    poNumber
-    poDate
-    orderId
-    supplierId
-    supplierName
-    salesChannelName
-    orderType
-    estimatedShipDate
-    customerName
-    customerEmail
-    customerAddress1
-    customerAddress2
-    customerCity
-    customerState
-    customerPostalCode
-    customerCountry
-    warehouse {{ name }}
-    shippingInfo {{ shipSpeed carrierCode }}
-    shipTo {{ name address1 address2 city state country postalCode }}
-    {products_fragment()}
-  }}
-}}
-"""
-
-
-_TRANSIENT_HTTP = {429, 500, 502, 503, 504}
-
-
-def _is_transient(e: Exception) -> bool:
+def _normalize_month(month_str):
+    """Chuan hoa 'M/YYYY' hoac 'M/YY' ve dang 'YYYY-MM' de cac tab khac nhau
+    (Ads dung M/YYYY, Return dung M/YY) khop duoc voi nhau."""
+    if not month_str:
+        return None
     try:
-        if isinstance(e, gspread.exceptions.APIError):
-            return e.response.status_code in _TRANSIENT_HTTP
-    except Exception:
-        pass
-    if isinstance(e, requests.exceptions.RequestException):
-        resp = getattr(e, "response", None)
-        return (resp.status_code in _TRANSIENT_HTTP) if resp is not None else True
-    return False
+        parts = month_str.strip().split("/")
+        if len(parts) != 2:
+            return None
+        m, y = int(parts[0]), int(parts[1])
+        if y < 100:
+            y += 2000
+        return f"{y:04d}-{m:02d}"
+    except (ValueError, IndexError):
+        return None
 
 
-def _retry(label: str, fn, tries: int = 4, base_delay: int = 5):
-    """Thu lai khi gap loi tam thoi (503/429/5xx, timeout...). Loi khac -> raise ngay."""
-    for attempt in range(1, tries + 1):
-        try:
-            return fn()
-        except Exception as e:
-            if attempt < tries and _is_transient(e):
-                wait = base_delay * attempt
-                print(f"[retry] {label}: loi tam thoi ({type(e).__name__}), thu lai sau {wait}s ({attempt}/{tries - 1})")
-                time.sleep(wait)
-                continue
-            raise
+def _parse_us_date_to_iso(date_str):
+    """Chuyen 'M/D/YYYY' (dang text tu sheet) sang 'YYYY-MM-DD' de Postgres
+    sort/filter dung kieu ngay. Tra ve None neu khong parse duoc."""
+    if not date_str:
+        return None
+    try:
+        parts = date_str.strip().split("/")
+        if len(parts) != 3:
+            return None
+        m, d, y = int(parts[0]), int(parts[1]), int(parts[2])
+        return f"{y:04d}-{m:02d}-{d:02d}"
+    except (ValueError, IndexError):
+        return None
 
 
-def gql(token: str, query: str, variables: dict) -> Any:
-    def _do():
-        r = requests.post(GRAPHQL_URL, json={"query": query, "variables": variables},
-                          headers={"Authorization": f"Bearer {token}",
-                                   "Content-Type": "application/json"}, timeout=45)
-        r.raise_for_status()   # 5xx -> HTTPError (transient) -> se retry
-        return r
-    r = _retry("wayfair gql", _do)
-    body = r.json()
-    if body.get("errors"):
-        raise RuntimeError(f"GraphQL errors: {json.dumps(body['errors'])[:600]}")
-    return body["data"]
+def _row_has_error(row):
+    """Phat hien loi tam thoi cua IMPORTRANGE (VD khi file nguon dang bi
+    gian doan ket noi). Neu co, nen bo qua ca dong thay vi luu data rac.
+    row co the la list (get_all_values) hoac dict (get_all_records)."""
+    values = row.values() if isinstance(row, dict) else row
+    return any(str(cell).strip() in _SHEET_ERROR_TOKENS for cell in values)
 
 
-def fetch_day(token: str, root_field: str, start: dt.datetime, end: dt.datetime) -> list[dict]:
-    """Lay don co poDate trong [start, end) theo UTC. Phan trang ASC + tu dung khi qua 'end'."""
-    query = build_query(root_field)
-    out, seen, stop = [], set(), False
-    cursor = start.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    for _ in range(200):
-        data = gql(token, query, {"limit": PAGE_LIMIT, "fromDate": cursor, "sortOrder": "ASC"})
-        batch = data.get(root_field) or []
-        if not batch:
-            break
-        for po in batch:
-            d = _parse_dt(po.get("poDate"))
-            if d is None:
-                continue
-            if d >= end:            # sang ngay moi UTC -> bo & danh dau dung
-                stop = True
-                continue
-            if d < start:
-                continue
-            if po["poNumber"] in seen:
-                continue
-            seen.add(po["poNumber"])
-            out.append(po)
-        if stop or len(batch) < PAGE_LIMIT:
-            break
-        cursor = _bump_iso(max(po["poDate"] for po in batch))
-        time.sleep(3.0)
-    print(f"[fetch] {root_field}: {len(out)} PO trong khung ngay")
-    return out
-
-
-# ─────────────────────────────────────────────────────────────
-# 3. FLATTEN
-# ─────────────────────────────────────────────────────────────
-def to_rows(pos: list[dict], source: str) -> list[dict]:
-    rows = []
-    for po in pos:
-        ship = po.get("shipTo") or {}
-        wh = po.get("warehouse") or {}
-        shp = po.get("shippingInfo") or {}
-        carrier_code = (shp.get("carrierCode") or "")
-        # Cot D (Store Name): CG -> "SingleChannel", DS -> "Wayfair" (hoac "Wayfair.ca" neu Canada)
-        _chan = (po.get("salesChannelName") or "")
-        _is_ca = ("canad" in _chan.lower()) or (".ca" in _chan.lower())
-        if source == "castlegate":
-            store_name = "SingleChannel"
-        else:
-            store_name = "Wayfair.ca" if _is_ca else "Wayfair"
-        for p in (po.get("products") or []):
-            is_cancelled = bool(p.get("isCancelled"))   # chi co o production
-            qty = _num(p.get("quantity") or 0)
-            price = _num(p.get("price") or 0)
-            revenue = _num(p["totalCost"]) if p.get("totalCost") is not None else _num(float(qty) * float(price))
-            rows.append({
-                "revenue": revenue,
-                "warehouse_name": wh.get("name") or po.get("supplierName", "") or "",
-                "castlegate_rate": "",
-                "store_name": store_name,
-                "po_number": po.get("poNumber", "") or "",
-                "po_date_display": _mdy(po.get("poDate", ""), pad=False),
-                "must_ship_display": _mdy(po.get("estimatedShipDate", ""), pad=True),
-                "backorder_date": "",
-                "order_status": "Cancelled" if is_cancelled else "New",
-                "item_number": p.get("partNumber", "") or "",
-                "item_name": p.get("name", "") or "",
-                "quantity": qty,
-                "wholesale_price": price,
-                "ship_method": "",
-                "carrier_name": CARRIER_NAMES.get(carrier_code.upper(), carrier_code),
-                "shipping_account": "",
-                "ship_to_name": ship.get("name") or po.get("customerName", "") or "",
-                "ship_to_address1": ship.get("address1") or po.get("customerAddress1", "") or "",
-                "ship_to_address2": ship.get("address2") or po.get("customerAddress2", "") or "",
-                "ship_to_city": ship.get("city") or po.get("customerCity", "") or "",
-                "ship_to_state": ship.get("state") or po.get("customerState", "") or "",
-                "ship_to_zip": ship.get("postalCode") or po.get("customerPostalCode", "") or "",
-                "ship_to_country": ship.get("country") or po.get("customerCountry", "") or "",
-                "customer_email": po.get("customerEmail", "") or "",
-                "po_date_iso": _iso_date(po.get("poDate", "")),
-                "source": source,
-                "sku": p.get("sku", "") or "",
-            })
-    return rows
-
-
-# ─────────────────────────────────────────────────────────────
-# 4. GOOGLE SHEET
-# ─────────────────────────────────────────────────────────────
-def _gsa_info() -> dict:
-    if GSA_FILE:
-        with open(GSA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    if GSA_JSON:
-        return json.loads(GSA_JSON)
-    print("[config] THIEU GOOGLE_SERVICE_ACCOUNT_FILE hoac _JSON.", file=sys.stderr)
-    sys.exit(1)
-
-
-def sheet_client():
-    creds = Credentials.from_service_account_info(
-        _gsa_info(), scopes=["https://www.googleapis.com/auth/spreadsheets"])
+def _get_client():
+    creds = Credentials.from_service_account_file(GOOGLE_SERVICE_ACCOUNT_JSON, scopes=SCOPES)
     return gspread.authorize(creds)
 
 
-def _key(po: str, item: str) -> str:
-    return f"{po}::{item}"
+def _sheet():
+    return _get_client().open_by_key(SHEET_ID)
 
 
-def _col_letter(idx0: int) -> str:
-    """0-based col index -> chu cot A1 (0->A, 12->M...)."""
-    n, s = idx0 + 1, ""
-    while n > 0:
-        n, r = divmod(n - 1, 26)
-        s = chr(65 + r) + s
-    return s
+# ============================================================
+# products <- tab "Product"
+# ============================================================
+def sync_products(sh):
+    ws = sh.worksheet("Product")
+    rows = ws.get_all_values()
+    records = []
+    for row in rows[1:]:
+        if not row:
+            continue
+        if _row_has_error(row):
+            continue
+        sku = row[0].strip() if len(row) > 0 else ""
+        if not sku:
+            continue
+
+        def cell(i):
+            return row[i].strip() if i < len(row) else ""
+
+        records.append({
+            "sku": sku,
+            "product_name": cell(1),
+            "product_class": cell(2),
+            "asin": cell(3),
+            "cogs": _to_float(cell(4)),
+            "product_group": cell(9),
+        })
+    return records
 
 
-def write_sheet(rows: list[dict]) -> None:
-    """CHI CHEN dong moi xuong duoi (khong xoa/ghi de). Revenue = cong thuc =Qty*WholesalePrice."""
-    _need(SHEET_ID, "GOOGLE_SHEET_ID")
-    gc = sheet_client()
-    sh = _retry("mo sheet", lambda: gc.open_by_key(SHEET_ID))
+# ============================================================
+# pricing <- tab "Price"
+# ============================================================
+def sync_pricing(sh):
+    ws = sh.worksheet("Price")
+    rows = ws.get_all_records(expected_headers=[
+        "Supplier Part Number", "Product Name", "Status", "SKU",
+        "COGS", "Current Base Cost", "Retail Price", "Margin",
+    ])
+    records = []
+    for row in rows:
+        if _row_has_error(row):
+            continue
+        part_no = str(row.get("Supplier Part Number", "")).strip()
+        if not part_no:
+            continue
+        margin_raw = row.get("Margin")
+        records.append({
+            "supplier_part_number": part_no,
+            "sku_internal": str(row.get("SKU", "")).strip(),
+            "status": str(row.get("Status", "")).strip(),
+            "cogs": _to_float(row.get("COGS")),
+            "base_cost": _to_float(row.get("Current Base Cost")),
+            "retail_price": _to_float(row.get("Retail Price")),
+            "margin_pct": _to_float(margin_raw),
+        })
+    return records
 
-    def _open_tab():
+
+# ============================================================
+# supply_chain_stock <- tab "BC Ton & ASIN"
+# Header that nam o row 3 (khong phai row 1), nen doc raw values.
+# Cot co dinh theo cau truc da xac nhan: A..O
+# ============================================================
+def sync_supply_chain_stock(sh):
+    ws = sh.worksheet("BC Tồn & ASIN")
+    rows = ws.get_all_values()
+    data_rows = rows[3:]  # data bat dau tu row 4 (index 3)
+    records = []
+    for row in data_rows:
+        if len(row) < 15:
+            continue
+        if _row_has_error(row):
+            continue
+        supplier_part_number = row[5].strip()  # cot F: ASIN-part number (vd WF-TP00010)
+        if not supplier_part_number:
+            continue
+        records.append({
+            "supplier_part_number": supplier_part_number,
+            "supplier_name": row[2].strip(),      # C: NCC
+            "ma_sp": row[3].strip(),               # D: Ma SP
+            "product_name": row[4].strip(),        # E: Ten SP
+            "asin": supplier_part_number,
+            "fnsku_gtin": row[6].strip(),          # G
+            "brand": row[7].strip(),               # H
+            "market": row[9].strip(),              # J
+            "stock_vn": _to_float(row[10]),        # K: Luu kho tai VN
+            "in_production_vn": _to_float(row[11]),# L: Dang san xuat tai VN
+            "on_the_sea": _to_float(row[12]),      # M: Tong hang tren bien di
+            "account_stock": _to_float(row[13]),   # N: Hang ton trong account
+            "total_pending": _to_float(row[14]),   # O: Tong hang dang cho ban
+        })
+    return records
+
+
+# ============================================================
+# inbound <- tab "INBOUND", CHI danh sach chinh (theo Giang chon)
+# Header row 1 co mot so cot bi trong ten, nen doc raw values.
+# Cot co dinh: A Part Number, B Ma TP, C Ten hang, D Active Date,
+#              E Qty, F Stage, G Channel, H Market
+# ============================================================
+def sync_inbound(sh):
+    ws = sh.worksheet("INBOUND")
+    rows = ws.get_all_values()
+    data_rows = rows[1:]  # data bat dau tu row 2
+    records = []
+    for row in data_rows:
+        if len(row) < 8:
+            continue
+        if _row_has_error(row):
+            continue
+        part_number = row[0].strip()
+        if not part_number:
+            continue
+        records.append({
+            "supplier_part_number": part_number,
+            "ma_tp": row[1].strip(),
+            "product_name": row[2].strip(),
+            "active_date": row[3].strip(),
+            "qty": _to_float(row[4]),
+            "stage": row[5].strip(),      # PRODUCTION / SHIPMENT
+            "channel": row[6].strip(),
+            "market": row[7].strip(),
+        })
+    return records
+
+
+# ============================================================
+# monthly_sales <- tab "Orders" (pivot theo thang, wide format)
+# Row 2 (index 1) chua nhan thang vd '2026-Apr' tai cac cot le
+# Row 3 (index 2) chua sub-header 'SUM of Quantity' / 'SUM of Revenue'
+# Du lieu bat dau row 4 (index 3)
+# ============================================================
+def sync_monthly_sales(sh):
+    ws = sh.worksheet("Monthly")
+    rows = ws.get_all_values()
+    period_row = rows[1]
+    data_rows = rows[3:]
+
+    periods = []  # list of (year_month:str, qty_col_idx, rev_col_idx)
+    col = 4  # cot E (index 4) la vi tri bat dau cac cap thang
+    while col < len(period_row):
+        label = period_row[col].strip()
+        if label:
+            match = re.match(r"(\d{4})-([A-Za-z]{3})", label)
+            year_month = f"{match.group(1)}-{_MONTH_MAP.get(match.group(2), '00')}" if match else label
+            periods.append((year_month, col, col + 1))
+        col += 2
+
+    SANITY_MAX_QTY = 500_000       # 1 SKU/thang khong the ban vuot con so nay
+    SANITY_MAX_REV = 50_000_000    # tuong tu cho doanh thu (USD)
+
+    records = []
+    skipped = []
+    for row in data_rows:
+        if len(row) < 4:
+            continue
+        if _row_has_error(row):
+            continue
+        sku = row[3].strip()  # cot D: Item Number
+        product_name = row[2].strip() if len(row) > 2 else ""
+        if not sku or "total" in sku.lower() or "total" in product_name.lower():
+            continue
+
+        row_records = []
+        anomalous = False
+        for year_month, qty_idx, rev_idx in periods:
+            qty = _to_float(row[qty_idx]) if qty_idx < len(row) else None
+            rev = _to_float(row[rev_idx]) if rev_idx < len(row) else None
+            if qty is None and rev is None:
+                continue
+            if (qty is not None and abs(qty) > SANITY_MAX_QTY) or (rev is not None and abs(rev) > SANITY_MAX_REV):
+                anomalous = True
+                break
+            row_records.append({
+                "sku": sku,
+                "product_name": product_name,
+                "year_month": year_month,
+                "quantity": int(qty) if qty is not None else None,
+                "revenue": rev,
+            })
+
+        if anomalous:
+            skipped.append(sku)
+            continue
+        records.extend(row_records)
+
+    if skipped:
+        print(f"[monthly_sales] Bo qua {len(skipped)} dong co so lieu bat thuong (nghi la dong Total/rac): {skipped[:10]}")
+
+    return records
+
+
+# ============================================================
+# inbound_summary <- bang "Stage / Units" trong dashboard cua tab INBOUND
+# Day la nguon tong hop chuan (Giang xac nhan), khac voi danh sach chinh
+# vi danh sach chinh co the chua phan anh het cac lo qua som (New Lot).
+# Tim vi tri bang bang cach quet label "Stage" + "Units" thay vi hardcode
+# toa do, vi day la vung dashboard de bi dich chuyen khi sua sheet.
+# ============================================================
+def sync_inbound_summary(sh):
+    ws = sh.worksheet("INBOUND")
+    rows = ws.get_all_values()
+
+    header_pos = None
+    for r_idx, row in enumerate(rows):
+        for c_idx, cell in enumerate(row):
+            if cell.strip() == "Stage" and c_idx + 1 < len(row) and row[c_idx + 1].strip() == "Units":
+                header_pos = (r_idx, c_idx)
+                break
+        if header_pos:
+            break
+
+    if header_pos is None:
+        print("[inbound_summary] Khong tim thay bang Stage/Units, bo qua bang nay.")
+        return []
+
+    r0, c0 = header_pos
+    records = []
+    for row in rows[r0 + 1:]:
+        if c0 >= len(row) or not row[c0].strip():
+            break
+        if _row_has_error(row[c0:c0 + 2]):
+            continue
+        stage = row[c0].strip()
+        units = _to_float(row[c0 + 1]) if c0 + 1 < len(row) else None
+        records.append({"stage": stage, "units": units})
+
+    return records
+
+
+# ============================================================
+# daily_orders <- tab Order (export hang ngay, Dropship vs CastleGate)
+# ============================================================
+ORDERS_TAB_NAME = "Orders"
+
+def sync_daily_orders(sh):
+    ws = sh.worksheet(ORDERS_TAB_NAME)
+    rows = ws.get_all_values()
+    data_rows = rows[1:]  # bo qua header row
+
+    records = []
+    for row in data_rows:
+        if len(row) < 12:
+            continue
+        if _row_has_error(row):
+            continue
+        item_number = row[9].strip()  # J: Item Number
+        if not item_number:
+            continue
+
+        store_name = row[3].strip()  # D: Store Name
+        source = "castlegate" if store_name.lower() == "singlechannel" else "dropship"
+
+        records.append({
+            "revenue": _to_float(row[0]),            # A
+            "warehouse_name": row[1].strip(),          # B
+            "store_name": store_name,                  # D
+            "source": source,
+            "po_number": row[4].strip(),               # E
+            "po_date": row[5].strip(),                 # F
+            "po_date_iso": _parse_us_date_to_iso(row[5].strip()),
+            "order_status": row[8].strip(),             # I
+            "item_number": item_number,                 # J
+            "item_name": row[10].strip(),               # K
+            "quantity": _to_float(row[11]),             # L
+        })
+
+    return records
+
+
+# ============================================================
+# forecast <- tab Forecast (rolling forecast, 10 chu ky x 15 ngay)
+# Header row co ten chu ky lap lai o cot E-N (forecast demand) va
+# O-X (projected stock). Chuyen tu wide sang long format.
+# ============================================================
+def sync_forecast(sh):
+    ws = sh.worksheet("Forecast")
+    rows = ws.get_all_values()
+    header = rows[0]
+    data_rows = rows[1:]
+
+    records = []
+    for row in data_rows:
+        if len(row) < 24:
+            continue
+        if _row_has_error(row):
+            continue
+        part_number = row[0].strip()
+        if not part_number:
+            continue
+
+        product_name = row[1].strip()
+        current_stock = _to_float(row[2])
+        sales_raw = row[3].strip() if len(row) > 3 else ""
+        sales_rate = None if sales_raw.upper() == "NONE" else _to_float(sales_raw)
+        ipi = _to_float(row[25]) if len(row) > 25 else None
+
+        for i in range(10):
+            demand_idx = 4 + i    # cot E..N
+            stock_idx = 14 + i    # cot O..X
+            if demand_idx >= len(row) or stock_idx >= len(row):
+                continue
+            cycle_label = header[demand_idx].strip() if demand_idx < len(header) else f"Chu ky {i + 1}"
+            records.append({
+                "part_number": part_number,
+                "product_name": product_name,
+                "current_stock": current_stock,
+                "sales_rate": sales_rate,
+                "ipi": ipi,
+                "cycle_index": i + 1,
+                "cycle_label": cycle_label,
+                "forecast_demand": _to_float(row[demand_idx]),
+                "projected_stock": _to_float(row[stock_idx]),
+            })
+
+    return records
+
+
+# ============================================================
+# ads_monthly <- tab "Ads" (cap nhat theo thang, du lieu la "hien tai")
+# Join voi products qua ASIN (khong qua SKU vi "Ma TP" trong tab Ads
+# khong co tien to WF- nen khong khop truc tiep duoc)
+# ============================================================
+# ============================================================
+# returns_monthly <- tab "Return" (Incidents/Buyer's Remorse/Replacement)
+# So luong return = Incidents Number + Buyer's Remorse Number + Replacement Count
+# ============================================================
+def sync_returns(sh):
+    ws = sh.worksheet("Return")
+    rows = ws.get_all_values()
+    header = rows[0]
+
+    def col_idx(name):
         try:
-            return sh.worksheet(SHEET_TAB)
-        except gspread.WorksheetNotFound:
-            return sh.add_worksheet(title=SHEET_TAB, rows=5000, cols=max(30, len(DEFAULT_HEADERS)))
-    ws = _retry("mo tab", _open_tab)
+            return header.index(name)
+        except ValueError:
+            return None
 
-    existing = _retry("doc sheet", lambda: ws.get_all_values())
-    header_exists = bool(existing and any(c.strip() for c in existing[0]))
-    header = existing[0] if header_exists else DEFAULT_HEADERS
-    data = existing[1:] if header_exists else []
-    norm_header = [_norm(h) for h in header]
-
-    def idx_of(key):
-        return next((i for i, nh in enumerate(norm_header) if HEADER_TO_KEY.get(nh) == key), None)
-
-    po_idx, item_idx = idx_of("po_number"), idx_of("item_number")
-    qty_idx, price_idx, rev_idx = idx_of("quantity"), idx_of("wholesale_price"), idx_of("revenue")
-
-    # key da co san trong tab -> khong chen lai (tranh trung)
-    seen = set()
-    if po_idx is not None and item_idx is not None:
-        for r in data:
-            if len(r) > max(po_idx, item_idx) and r[po_idx]:
-                seen.add(_key(r[po_idx], r[item_idx]))
-
-    new = [row for row in rows if _key(row["po_number"], row["item_number"]) not in seen]
-    if not new:
-        print(f"[sheet] '{SHEET_TAB}': khong co dong moi de chen (da co san)")
-        return
-
-    start_row = (len(existing) + 1) if header_exists else 1
-    first_data_row = start_row if header_exists else 2
-    matrix = [] if header_exists else [header]
-
-    for i, row in enumerate(new):
-        abs_row = first_data_row + i
-        aligned = [str(row.get(HEADER_TO_KEY.get(nh, ""), "")) for nh in norm_header]
-        if rev_idx is not None and qty_idx is not None and price_idx is not None:
-            aligned[rev_idx] = f"={_col_letter(qty_idx)}{abs_row}*{_col_letter(price_idx)}{abs_row}"
-        matrix.append(aligned)
-
-    _retry("ghi sheet", lambda: ws.update(values=matrix, range_name=f"A{start_row}", value_input_option="USER_ENTERED"))
-    print(f"[sheet] '{SHEET_TAB}': CHEN THEM {len(new)} dong (tu dong {first_data_row}), giu nguyen data cu")
-
-
-# ─────────────────────────────────────────────────────────────
-# 5. SUPABASE
-# ─────────────────────────────────────────────────────────────
-def push_supabase(rows: list[dict]) -> None:
-    _need(SUPABASE_URL, "SUPABASE_URL")
-    _need(SUPABASE_SERVICE_KEY, "SUPABASE_SERVICE_KEY")
-    if not rows:
-        return
-    payload = [{
-        "po_number": r["po_number"], "po_date_iso": r["po_date_iso"],
-        "source": r["source"], "item_number": r["item_number"],
-        "item_name": r["item_name"], "quantity": r["quantity"], "revenue": r["revenue"],
-    } for r in rows]
-    url = f"{SUPABASE_URL}/rest/v1/{SUPABASE_TABLE}?on_conflict=po_number,item_number"
-    headers = {
-        "apikey": SUPABASE_SERVICE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates,return=minimal",
+    idx = {
+        "month": col_idx("Month"),
+        "product_name": col_idx("Product Name"),
+        "product_id": col_idx("Product ID"),
+        "wayfair_sku": col_idx("Wayfair SKU"),
+        "incidents_number": col_idx("Incidents Number"),
+        "remorse_number": col_idx("Buyers's Remorse Returns Number"),
+        "replacement_count": col_idx("Replacement Parts Count"),
+        "total_deduction": col_idx("Total Deductions"),
+        "class_name": col_idx("Class"),
+        "last_delivery_date": col_idx("Last Delivery Date Reported"),
     }
-    for i in range(0, len(payload), 500):
-        r = requests.post(url, headers=headers, data=json.dumps(payload[i:i+500]), timeout=60)
-        if r.status_code >= 300:
-            raise RuntimeError(f"Supabase {r.status_code}: {r.text[:400]}")
-    print(f"[supabase] upsert {len(payload)} dong -> {SUPABASE_TABLE}")
+
+    if idx["product_id"] is None:
+        print("[returns_monthly] Khong tim thay cot 'Product ID', kiem tra lai ten cot trong sheet.")
+        return []
+
+    def get(row, key):
+        i = idx[key]
+        return row[i].strip() if i is not None and i < len(row) else ""
+
+    records = []
+    for row in rows[1:]:
+        if _row_has_error(row):
+            continue
+        product_id = get(row, "product_id")
+        if not product_id:
+            continue
+        records.append({
+            "month": _normalize_month(get(row, "month")),
+            "product_name": get(row, "product_name"),
+            "product_id": product_id,
+            "wayfair_sku": get(row, "wayfair_sku"),
+            "incidents_number": _to_float(get(row, "incidents_number")),
+            "remorse_number": _to_float(get(row, "remorse_number")),
+            "replacement_count": _to_float(get(row, "replacement_count")),
+            "total_deduction": _to_float(get(row, "total_deduction")),
+            "class_name": get(row, "class_name"),
+            "last_delivery_date": get(row, "last_delivery_date"),
+        })
+    return records
 
 
-# ─────────────────────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────────────────────
-def safe_fetch(token: str, root_field: str, start: dt.datetime, end: dt.datetime) -> list[dict]:
-    """Neu endpoint chua duoc cap quyen tren app -> bo qua, khong lam sap ca lan chay."""
-    try:
-        return fetch_day(token, root_field, start, end)
-    except RuntimeError as e:
-        msg = str(e)
-        if "Cannot query field" in msg or "Did you mean" in msg:
-            print(f"[warn] '{root_field}' chua duoc bat tren app nay -> BO QUA. "
-                  f"(Can xin quyen {('CastleGate' if 'CastleGate' in root_field else 'Dropship')} Orders API cho app production.)")
-            return []
-        raise
+# ============================================================
+# freight_monthly <- tab "Freight" (Transportation + Fulfillment CastleGate)
+# ============================================================
+def sync_freight(sh):
+    ws = sh.worksheet("Freight")
+    rows = ws.get_all_values()
+    records = []
+    for row in rows[1:]:
+        if _row_has_error(row):
+            continue
+        if len(row) < 3:
+            continue
+        month = _normalize_month(row[0].strip())
+        charge_type = row[1].strip()
+        if not month or not charge_type:
+            continue
+        records.append({
+            "month": month,
+            "charge_type": charge_type,
+            "charge_amount": _to_float(row[2]),
+        })
+    return records
 
 
-def main() -> None:
-    start, end = target_window()
-    print(f"[run] env={ENV} | lay don UTC ngay {start.date()} (khung [{start} , {end}))")
+def sync_ads_monthly(sh):
+    ws = sh.worksheet("Ads")
+    rows = ws.get_all_values()
+    header = rows[0]
 
-    token = get_token()
-    cg = safe_fetch(token, "getCastleGatePurchaseOrders", start, end)
-    time.sleep(3.0)
-    ds = safe_fetch(token, "getDropshipPurchaseOrders", start, end)
+    def col_idx(name):
+        try:
+            return header.index(name)
+        except ValueError:
+            return None
 
-    rows = to_rows(cg, "castlegate") + to_rows(ds, "dropship")
-    print(f"[flatten] tong {len(rows)} line items")
-    if not rows:
-        print("[run] khong co don trong khung ngay. Xong.")
+    idx = {
+        "month": col_idx("Month"),
+        "product_name": col_idx("Product Name"),
+        "product_group": col_idx("Product Group"),
+        "cogs": col_idx("Cogs"),
+        "cogs_total": col_idx("COGS"),
+        "asin": col_idx("ASIN"),
+        "part_number_raw": col_idx("Mã TP"),
+        "revenue": col_idx("Revenue"),
+        "orders": col_idx("Orders"),
+        "impression": col_idx("Impression"),
+        "clicks": col_idx("Clicks"),
+        "spend": col_idx("Spends"),
+        "ads_ws_sale": col_idx("Ads WS Sale"),
+    }
+
+    if idx["asin"] is None:
+        print("[ads_monthly] Khong tim thay cot 'ASIN' trong header, kiem tra lai ten cot trong sheet.")
+        return []
+
+    def get(row, key):
+        i = idx[key]
+        return row[i].strip() if i is not None and i < len(row) else ""
+
+    records = []
+    for row in rows[1:]:
+        if _row_has_error(row):
+            continue
+        asin = get(row, "asin")
+        if not asin or asin.upper() == "GRAND TOTAL":
+            continue
+        records.append({
+            "month": _normalize_month(get(row, "month")),
+            "asin": asin,
+            "product_name": get(row, "product_name"),
+            "product_group": get(row, "product_group"),
+            "cogs": _to_float(get(row, "cogs")),
+            "cogs_total": _to_float(get(row, "cogs_total")),
+            "part_number_raw": get(row, "part_number_raw"),
+            "revenue": _to_float(get(row, "revenue")),
+            "orders": _to_float(get(row, "orders")),
+            "impression": _to_float(get(row, "impression")),
+            "clicks": _to_float(get(row, "clicks")),
+            "spend": _to_float(get(row, "spend")),
+            "ads_ws_sale": _to_float(get(row, "ads_ws_sale")),
+        })
+    return records
+
+
+def _dedupe(records, on_conflict):
+    """Loai bo dong trung key (giu dong cuoi cung = ban moi nhat), vi Postgres
+    khong cho upsert 2 dong trung key trong cung 1 lenh."""
+    keys = [k.strip() for k in on_conflict.split(",")]
+    deduped = {}
+    for r in records:
+        key = tuple(r.get(k) for k in keys)
+        deduped[key] = r
+    return list(deduped.values())
+
+
+def upsert(supabase, table, records, delete_filter_col, dedupe_keys=None):
+    if not records:
+        print(f"[{table}] khong co dong nao de sync.")
         return
+    if dedupe_keys:
+        records = _dedupe(records, dedupe_keys)
+    # Xoa toan bo du lieu cu roi ghi lai tu dau (full refresh), thay vi
+    # upsert cong don - vi bang nay la "guong" cua sheet, khong can giu
+    # du lieu cu. Tranh viec rac ton dong neu lan sync truoc bi loi
+    # (VD tro nham tab, parse sai cot...).
+    supabase.table(table).delete().gte(delete_filter_col, "").execute()
+    supabase.table(table).insert(records).execute()
+    print(f"[{table}] da sync {len(records)} dong (full refresh).")
 
-    write_sheet(rows)
-    if PUSH_SUPABASE:
-        push_supabase(rows)
-    else:
-        print("[supabase] WF_PUSH_SUPABASE=0 -> bo qua")
-    print("[run] DONE")
+
+def main():
+    sh = _sheet()
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+    upsert(supabase, "products", sync_products(sh), "sku", dedupe_keys="sku")
+    upsert(supabase, "pricing", sync_pricing(sh), "supplier_part_number", dedupe_keys="supplier_part_number")
+    upsert(supabase, "supply_chain_stock", sync_supply_chain_stock(sh), "supplier_part_number", dedupe_keys="supplier_part_number")
+    upsert(supabase, "inbound", sync_inbound(sh), "supplier_part_number", dedupe_keys=None)
+    upsert(supabase, "monthly_sales", sync_monthly_sales(sh), "sku", dedupe_keys="sku,year_month")
+    upsert(supabase, "inbound_summary", sync_inbound_summary(sh), "stage", dedupe_keys="stage")
+    upsert(supabase, "daily_orders", sync_daily_orders(sh), "item_number", dedupe_keys=None)
+    upsert(supabase, "forecast", sync_forecast(sh), "part_number", dedupe_keys=None)
+    upsert(supabase, "ads_monthly", sync_ads_monthly(sh), "asin", dedupe_keys=None)
+    upsert(supabase, "returns_monthly", sync_returns(sh), "product_id", dedupe_keys=None)
+    upsert(supabase, "freight_monthly", sync_freight(sh), "month", dedupe_keys=None)
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        print(f"[error] {type(e).__name__}: {e}", file=sys.stderr)
-        sys.exit(1)
+    main()
