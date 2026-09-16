@@ -1,0 +1,2041 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>TIDITA · Wayfair Ops</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#F7F6F2" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #F7F6F2;
+    --surface: #FFFFFF;
+    --surface-2: #F0EFE9;
+    --line: #E3E1D8;
+    --ink: #23241F;
+    --ink-dim: #78766C;
+    --brass: #A9702B;
+    --production: #A9702B;
+    --shipment: #2E7BA6;
+    --danger: #C24E3A;
+    --ok: #3F8F62;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Roboto', -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 48px;
+  }
+
+  .mono { font-family: 'Roboto Mono', monospace; }
+
+  header {
+    padding: 18px 18px 0;
+    border-bottom: 1px solid var(--line);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+
+  header h1 {
+    font-family: 'Roboto', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  header .sub {
+    color: var(--ink-dim);
+    font-size: 12.5px;
+    margin-top: 4px;
+    font-family: 'Roboto Mono', monospace;
+  }
+
+  nav.tabs {
+    display: flex;
+    gap: 4px;
+    margin-top: 16px;
+  }
+
+  nav.tabs button {
+    background: none;
+    border: none;
+    color: var(--ink-dim);
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 10px 4px 12px;
+    margin-right: 18px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+  }
+
+  nav.tabs button.active {
+    color: var(--ink);
+    border-bottom-color: var(--brass);
+  }
+
+  .export-btn {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-family: 'Roboto', sans-serif;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 100px;
+    cursor: pointer;
+  }
+
+  .export-btn:hover { background: var(--line); }
+
+  @media print {
+    #aiFab, #aiModal, .search-wrap, nav.tabs, .subtabs, .export-btn, .expand-toggle { display: none !important; }
+    body { background: #fff; }
+  }
+
+  .search-wrap {
+    position: relative;
+    margin-top: 14px;
+  }
+
+  #skuSearchInput {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  #skuSearchInput:focus { outline: none; border-color: var(--brass); }
+
+  #skuSearchResults {
+    display: none;
+    position: absolute;
+    top: 44px;
+    left: 0;
+    right: 0;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    z-index: 60;
+    max-height: 320px;
+    overflow-y: auto;
+  }
+
+  #skuSearchResults.open { display: block; }
+
+  .search-result-row {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--line);
+    font-size: 12.5px;
+  }
+
+  .search-result-row:last-child { border-bottom: none; }
+  .search-result-row:hover { background: var(--surface-2); }
+
+  .subtabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+
+  .subtabs button {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    color: var(--ink-dim);
+    font-family: 'Roboto Mono', monospace;
+    font-size: 11.5px;
+    padding: 6px 14px;
+    border-radius: 100px;
+    cursor: pointer;
+  }
+
+  .subtabs button.sub-active {
+    background: var(--brass);
+    color: #fff;
+    border-color: var(--brass);
+  }
+
+  .subtab-panel { display: none; }
+  .subtab-panel.active { display: block; }
+
+  .category-block {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+
+  .category-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 14px;
+    cursor: pointer;
+    gap: 10px;
+  }
+
+  .category-header:hover { background: var(--surface-2); }
+
+  .category-arrow {
+    font-size: 10px;
+    color: var(--ink-dim);
+    transition: transform 0.15s;
+    margin-right: 6px;
+  }
+
+  .category-block.open .category-arrow { transform: rotate(90deg); }
+
+  .category-sub {
+    display: none;
+    background: var(--surface-2);
+    padding: 4px 14px;
+    border-top: 1px solid var(--line);
+  }
+
+  .category-block.open .category-sub { display: block; }
+
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(35,36,31,0.45);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+
+  .modal-overlay.open { display: flex; }
+
+  .modal-overlay .modal-box {
+    background: var(--surface);
+    border-radius: 14px;
+    max-width: 480px;
+    width: 100%;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .modal-overlay .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 6px;
+  }
+
+  .modal-overlay .modal-header button {
+    background: none;
+    border: none;
+    color: var(--ink-dim);
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  main { padding: 16px; max-width: 720px; margin: 0 auto; }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  section { margin-bottom: 28px; }
+
+  .section-title {
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-dim);
+    margin: 0 0 10px 2px;
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .stat-card .label {
+    font-size: 11.5px;
+    color: var(--ink-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .stat-card .value {
+    font-family: 'Roboto', sans-serif;
+    font-size: 26px;
+    font-weight: 700;
+    margin-top: 4px;
+  }
+
+  .stat-card-link {
+    margin-top: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--brass);
+    cursor: pointer;
+    width: fit-content;
+  }
+
+  .stat-card-link:hover { text-decoration: underline; }
+
+  .lot-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--ink-dim);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .lot-card.production { border-left-color: var(--production); }
+  .lot-card.shipment { border-left-color: var(--shipment); }
+
+  .lot-main { min-width: 0; }
+
+  .lot-name {
+    font-size: 13.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .lot-meta {
+    font-size: 11.5px;
+    color: var(--ink-dim);
+    margin-top: 2px;
+  }
+
+  .badge {
+    font-family: 'Roboto Mono', monospace;
+    font-size: 10.5px;
+    padding: 3px 8px;
+    border-radius: 100px;
+    white-space: nowrap;
+    font-weight: 500;
+  }
+
+  .badge.production { background: rgba(169,112,43,0.12); color: var(--production); }
+  .badge.shipment { background: rgba(46,123,166,0.12); color: var(--shipment); }
+  .badge.rank1 { background: rgba(169,112,43,0.18); color: var(--brass); }
+  .badge.danger { background: rgba(194,78,58,0.14); color: var(--danger); }
+
+  .stock-row, .price-row, .rank-row {
+    display: grid;
+    gap: 8px;
+    font-size: 12.5px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+    align-items: center;
+  }
+
+  .stock-row { grid-template-columns: 1fr auto; }
+  .price-row { grid-template-columns: 1fr auto auto; }
+  .rank-row { grid-template-columns: 24px 1fr auto; }
+
+  .stock-row.head, .price-row.head, .rank-row.head {
+    color: var(--ink-dim);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .num { font-family: 'Roboto Mono', monospace; text-align: right; min-width: 42px; }
+  .low, .neg { color: var(--danger); font-weight: 600; }
+  .rank-idx { color: var(--ink-dim); font-family: 'Roboto Mono', monospace; }
+
+  select, #orderDatePicker {
+    background: var(--surface);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 12.5px;
+    margin-bottom: 12px;
+  }
+
+  #salesChart { width: 100%; max-height: 220px; }
+
+  .empty {
+    color: var(--ink-dim);
+    font-size: 13px;
+    padding: 20px 0;
+    text-align: center;
+  }
+
+  .error-banner {
+    background: rgba(194,78,58,0.1);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    margin-bottom: 16px;
+  }
+
+  .expand-toggle {
+    text-align: center;
+    padding: 10px 0;
+    color: var(--brass);
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+  }
+  .expand-toggle:hover { opacity: 0.75; }
+
+  .row-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #aiFab {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 54px;
+    height: 54px;
+    border-radius: 50%;
+    background: var(--brass);
+    border: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+    font-size: 24px;
+    cursor: pointer;
+    z-index: 50;
+  }
+
+  #aiModal {
+    display: none;
+    position: fixed;
+    bottom: 86px;
+    right: 20px;
+    width: 320px;
+    max-width: calc(100vw - 32px);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    padding: 16px;
+    z-index: 51;
+  }
+
+  #aiModal.open { display: block; }
+
+  .ai-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 13.5px;
+    margin-bottom: 10px;
+  }
+
+  .ai-modal-header button {
+    background: none;
+    border: none;
+    color: var(--ink-dim);
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .ai-modal-body {
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--ink);
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  #aiChatMessages {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chat-msg {
+    padding: 8px 12px;
+    border-radius: 12px;
+    max-width: 85%;
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+
+  .chat-msg-user {
+    align-self: flex-end;
+    background: var(--brass);
+    color: #fff;
+    border-bottom-right-radius: 3px;
+  }
+
+  .chat-msg-assistant {
+    align-self: flex-start;
+    background: var(--surface-2);
+    color: var(--ink);
+    border-bottom-left-radius: 3px;
+  }
+
+  .chat-loading { opacity: 0.6; font-style: italic; }
+
+  .ai-chat-input-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  #aiChatInput {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    color: var(--ink);
+  }
+
+  #aiChatInput:focus { outline: none; border-color: var(--brass); }
+
+  #aiChatSend {
+    background: var(--brass);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-family: 'Roboto', sans-serif;
+    font-weight: 600;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>TIDITA · Wayfair Ops</h1>
+  <div class="sub" id="syncedAt">đang tải...</div>
+  <div class="search-wrap">
+    <input id="skuSearchInput" type="text" placeholder="🔍 Tìm SKU hoặc tên sản phẩm..." autocomplete="off" />
+    <div id="skuSearchResults"></div>
+  </div>
+  <nav class="tabs">
+    <button data-tab="shipment" class="active">Shipment</button>
+    <button data-tab="sales">Sales</button>
+    <button data-tab="order">Order</button>
+    <button data-tab="price">Profit</button>
+    <button data-tab="ads">Ads</button>
+  </nav>
+</header>
+
+<main>
+  <div id="errorBanner"></div>
+
+  <!-- ============ TAB: SHIPMENT ============ -->
+  <div id="tab-shipment" class="tab-panel active">
+    <section>
+    <section>
+      <div class="section-title">Tổng quan tồn kho</div>
+      <div class="stat-grid" id="statGrid">
+        <div class="stat-card"><div class="label">Lưu kho VN</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Đang sản xuất</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Trên biển</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Tồn Account</div><div class="value">–</div></div>
+      </div>
+      <canvas id="stageChart" style="margin-top:14px;"></canvas>
+    </section>
+
+    <section>
+      <div class="section-title">⚠️ Cảnh báo sắp hết hàng</div>
+      <div id="stockAlertList"><div class="empty">đang tải...</div></div>
+    </section>
+
+    <section>
+      <div class="section-title">📦 Inventory Plan</div>
+      <div id="orderSuggestList"><div class="empty">đang tải...</div></div>
+    </section>
+
+    <section>
+      <div class="section-title">Shipment gần nhất</div>
+      <div id="inboundList"><div class="empty">đang tải...</div></div>
+    </section>
+
+    <section>
+      <div class="section-title">Tồn theo SKU (trong account)</div>
+      <div class="stat-card" style="margin-bottom:12px;">
+        <div class="label">Tổng tồn trong account</div>
+        <div class="value mono" id="totalAccountStock">–</div>
+      </div>
+      <div class="stock-row head">
+        <div>SKU / Tên SP</div><div class="num">Tồn account</div>
+      </div>
+      <div id="stockList"><div class="empty">đang tải...</div></div>
+    </section>
+
+
+  </div>
+
+  <!-- ============ TAB: SALES ============ -->
+  <div id="tab-sales" class="tab-panel">
+    <section>
+      <div class="section-title">Doanh thu theo tháng</div>
+      <canvas id="salesChart"></canvas>
+    </section>
+
+    <section>
+      <div class="section-title">Top SKU theo doanh thu</div>
+      <select id="monthSelect"></select>
+      <div class="rank-row head">
+        <div></div><div>SKU</div><div class="num">Revenue</div>
+      </div>
+      <div id="topSkuList"><div class="empty">đang tải...</div></div>
+    </section>
+  </div>
+
+  <!-- ============ TAB: ORDER ============ -->
+  <div id="tab-order" class="tab-panel">
+    <section>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div class="section-title" id="orderDayTitle" style="margin:0;">Ngày gần nhất</div>
+        <input type="date" id="orderDatePicker" />
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="label">Tổng đơn</div><div class="value mono" id="orderTotalCount">–</div></div>
+        <div class="stat-card"><div class="label">Doanh thu</div><div class="value mono" id="orderTotalRevenue">–</div></div>
+        <div class="stat-card"><div class="label">Dropship</div><div class="value mono" id="orderDropshipCount">–</div></div>
+        <div class="stat-card"><div class="label">CastleGate</div><div class="value mono" id="orderCastlegateCount">–</div></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title" id="orderSkuListTitle">Đơn ngày gần nhất theo SKU</div>
+      <div class="rank-row head">
+        <div></div><div>Part Number / Tên SP</div><div class="num">SL / Doanh thu</div>
+      </div>
+      <div id="orderDayList"><div class="empty">đang tải...</div></div>
+    </section>
+
+    <section>
+      <div class="section-title" id="orderChartTitle">Số đơn theo ngày</div>
+      <canvas id="orderChart"></canvas>
+    </section>
+  </div>
+
+  <!-- ============ TAB: PRICE ============ -->
+  <div id="tab-price" class="tab-panel">
+    <section>
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <div class="section-title" id="profitMonthTitle" style="margin:0;">Profit</div>
+          <select id="profitMonthPicker"></select>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button id="exportExcelBtn" class="export-btn">⬇ Excel</button>
+          <button id="exportPdfBtn" class="export-btn">⬇ PDF</button>
+        </div>
+      </div>
+      <div class="stat-grid" id="profitStatGrid">
+        <div class="stat-card"><div class="label">Tổng WS Sales</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Tổng Ad Spend</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Tổng COGS</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Profit</div><div class="value">–</div></div>
+      </div>
+      <div style="display:flex; gap:16px; flex-wrap:wrap; justify-content:center; margin-top:20px;">
+        <div style="flex:1; min-width:180px; max-width:220px;">
+          <div class="section-title" style="text-align:center; font-size:11px;">Revenue → COGS/Ads/Profit</div>
+          <canvas id="revenueBreakdownChart"></canvas>
+        </div>
+        <div style="flex:1; min-width:180px; max-width:220px;">
+          <div class="section-title" style="text-align:center; font-size:11px;">Ads vs Organic</div>
+          <canvas id="profitSplitChart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="subtabs">
+        <button data-profitview="group" class="sub-active">Theo nhóm sản phẩm</button>
+        <button data-profitview="abc">ABC Analysis</button>
+      </div>
+      <div id="profitGroupView">
+        <div id="profitList"><div class="empty">đang tải...</div></div>
+      </div>
+      <div id="profitAbcView" style="display:none;">
+        <div class="lot-meta mono" id="abcMeta" style="margin-bottom:10px;">–</div>
+        <div id="abcList"><div class="empty">đang tải...</div></div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ============ TAB: ADS ============ -->
+  <div id="tab-ads" class="tab-panel">
+    <section>
+      <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div class="section-title" id="adsMonthTitle" style="margin:0;">Ads</div>
+        <select id="adsMonthPicker"></select>
+      </div>
+      <div class="stat-grid" id="adsStatGrid">
+        <div class="stat-card"><div class="label">Tổng Spend</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Impressions</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">Clicks</div><div class="value">–</div></div>
+        <div class="stat-card"><div class="label">ACOS / TACOS</div><div class="value">–</div></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-title">Theo Product Group (Listing)</div>
+      <div id="adsList"><div class="empty">đang tải...</div></div>
+    </section>
+  </div>
+</main>
+
+<!-- ============ SKU DETAIL MODAL ============ -->
+<div id="skuModalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span id="skuModalTitle">SKU</span>
+      <button id="skuModalClose" aria-label="Đóng">✕</button>
+    </div>
+    <div id="skuModalBody" class="ai-modal-body"></div>
+  </div>
+</div>
+
+<!-- ============ RETURN DETAIL MODAL ============ -->
+<div id="returnModalOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span id="returnMonthTitle">Return</span>
+      <button id="returnModalClose" aria-label="Đóng">✕</button>
+    </div>
+    <div class="lot-meta mono" id="returnHeaderMeta" style="margin-bottom:14px;">–</div>
+    <div class="rank-row head">
+      <div></div><div>Sản phẩm</div><div class="num">Return / Deduction</div>
+    </div>
+    <div id="returnList"><div class="empty">đang tải...</div></div>
+  </div>
+</div>
+
+<!-- ============ AI FLOATING WIDGET ============ -->
+<button id="aiFab" aria-label="Trợ lý AI">🤖</button>
+<div id="aiModal">
+  <div class="ai-modal-header">
+    <span>🤖 Trợ lý TIDITA</span>
+    <button id="aiModalClose" aria-label="Đóng">✕</button>
+  </div>
+  <div id="aiChatMessages" class="ai-modal-body"></div>
+  <div class="ai-chat-input-row">
+    <input id="aiChatInput" type="text" placeholder="Hỏi gì đó..." autocomplete="off" />
+    <button id="aiChatSend">Gửi</button>
+  </div>
+</div>
+
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script type="module">
+  import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+  // ==============================================================
+  // Dùng ANON KEY (public), KHÔNG dùng secret key ở đây.
+  // ==============================================================
+  const SUPABASE_URL = 'https://txzzgcyvvaiiiukaslqj.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR4enpnY3l2dmFpaWl1a2FzbHFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUzNzg0NjEsImV4cCI6MjEwMDk1NDQ2MX0.WwfBaiE0ePKNOUN-_2tfa5dD3Sj2-9GvJnjk2m320xU';
+
+  const LOW_STOCK_THRESHOLD = 20;
+
+  const $ = (id) => document.getElementById(id);
+
+  function showError(msg) {
+    $('errorBanner').innerHTML = `<div class="error-banner">${msg}</div>`;
+  }
+
+  let supabase;
+  try {
+    supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  } catch (err) {
+    showError(`Không khởi tạo được Supabase client: ${err.message}`);
+    throw err;
+  }
+
+  function fmtNum(n) {
+    if (n === null || n === undefined) return '–';
+    return Number(n).toLocaleString('en-US');
+  }
+
+  // ---------------- Tab switching ----------------
+  document.querySelectorAll('nav.tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      $(`tab-${btn.dataset.tab}`).classList.add('active');
+    });
+  });
+
+  document.querySelectorAll('[data-profitview]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-profitview]').forEach(b => b.classList.remove('sub-active'));
+      btn.classList.add('sub-active');
+      const view = btn.dataset.profitview;
+      $('profitGroupView').style.display = view === 'group' ? 'block' : 'none';
+      $('profitAbcView').style.display = view === 'abc' ? 'block' : 'none';
+      if (view === 'abc') renderAbcAnalysis();
+    });
+  });
+
+  document.querySelectorAll('.subtabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const parent = btn.closest('.tab-panel');
+      parent.querySelectorAll('.subtabs button').forEach(b => b.classList.remove('sub-active'));
+      parent.querySelectorAll('.subtab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('sub-active');
+      $(`subtab-${btn.dataset.subtab}`).classList.add('active');
+    });
+  });
+
+  let salesRows = [];
+  let allData = { stock: [], inbound: [], pricing: [], products: [], forecast: [], ads: [], orders: [], adsAll: [], adsListingAll: [], skuReportAll: [], returnsAll: [], freightAll: [], freightDetailAll: [] };
+  let lastProfitData = null;
+
+  async function loadDashboard() {
+    try {
+      const [stockRes, inboundRes, salesRes, priceRes, summaryRes, ordersRes, productsRes, forecastRes, adsRes, adsListingRes, skuReportRes, returnsRes, freightRes, freightDetailRes] = await Promise.all([
+        supabase.from('supply_chain_stock').select('*').order('account_stock', { ascending: false }),
+        supabase.from('inbound').select('*').order('active_date', { ascending: true }),
+        supabase.from('monthly_sales').select('*').order('year_month', { ascending: true }),
+        supabase.from('pricing').select('*'),
+        supabase.from('inbound_summary').select('*'),
+        supabase.from('daily_orders').select('*').order('po_date_iso', { ascending: false }).limit(5000),
+        supabase.from('products').select('*'),
+        supabase.from('forecast').select('*').limit(3000),
+        supabase.from('ads_monthly').select('*').limit(1000),
+        supabase.from('ads_listing').select('*').limit(500),
+        supabase.from('ads_sku_report').select('*').limit(1000),
+        supabase.from('returns_monthly').select('*').limit(1000),
+        supabase.from('freight_monthly').select('*').limit(200),
+        supabase.from('freight_detail').select('*').limit(2000),
+      ]);
+
+      if (stockRes.error) throw stockRes.error;
+      if (inboundRes.error) throw inboundRes.error;
+      if (salesRes.error) throw salesRes.error;
+      if (priceRes.error) throw priceRes.error;
+      if (summaryRes.error) throw summaryRes.error;
+      if (productsRes.error) throw productsRes.error;
+      if (forecastRes.error) throw forecastRes.error;
+      if (adsRes.error) throw adsRes.error;
+      if (adsListingRes.error) throw adsListingRes.error;
+      if (skuReportRes.error) throw skuReportRes.error;
+      if (returnsRes.error) throw returnsRes.error;
+      if (freightRes.error) throw freightRes.error;
+      if (freightDetailRes.error) throw freightDetailRes.error;
+      if (ordersRes.error) throw ordersRes.error;
+
+      salesRows = salesRes.data || [];
+      const inboundRows = inboundRes.data || [];
+      const shipmentRows = inboundRows.filter(r => (r.stage || '').toUpperCase() === 'SHIPMENT');
+
+      allData = {
+        stock: stockRes.data || [],
+        inbound: inboundRows,
+        pricing: priceRes.data || [],
+        products: productsRes.data || [],
+        forecast: forecastRes.data || [],
+        ads: adsRes.data || [],
+        orders: ordersRes.data || [],
+        sales: salesRows,
+        adsAll: adsRes.data || [],
+        adsListingAll: adsListingRes.data || [],
+        skuReportAll: skuReportRes.data || [],
+        returnsAll: returnsRes.data || [],
+        freightAll: freightRes.data || [],
+        freightDetailAll: freightDetailRes.data || [],
+      };
+
+      renderStats(stockRes.data || [], summaryRes.data || []);
+      renderStockAlerts(forecastRes.data || []);
+      renderOrderSuggestions(forecastRes.data || []);
+      renderStockBreakdown(stockRes.data || [], 'account_stock', 'stockList', 'totalAccountStock');
+      renderInbound(shipmentRows);
+      renderSalesChart(salesRows);
+      renderMonthSelector(salesRows);
+      initProfitMonthPicker();
+      initAdsMonthPicker();
+      renderOrders(ordersRes.data || [], productsRes.data || []);
+
+      $('syncedAt').textContent = `dữ liệu lúc ${new Date().toLocaleString('vi-VN')}`;
+    } catch (err) {
+      console.error(err);
+      showError(
+        `Chưa tải được dữ liệu: ${err.message || err}. ` +
+        `Kiểm tra lại SUPABASE_URL / SUPABASE_ANON_KEY và RLS policy cho phép SELECT.`
+      );
+      $('syncedAt').textContent = 'lỗi tải dữ liệu';
+    }
+  }
+
+  // ---------------- Shipment tab ----------------
+  function renderStats(stock, summaryRows) {
+    const sumStock = (key) => stock.reduce((acc, r) => acc + (Number(r[key]) || 0), 0);
+    const getStage = (name) => {
+      const row = summaryRows.find(r => (r.stage || '').toLowerCase() === name.toLowerCase());
+      return row ? (Number(row.units) || 0) : 0;
+    };
+
+    const cards = [
+      ['Lưu kho VN', sumStock('stock_vn')],
+      ['Đang sản xuất', getStage('In Production') + getStage('New Lot')],
+      ['Trên biển', getStage('On the Sea')],
+      ['Tồn Account', sumStock('account_stock')],
+    ];
+    $('statGrid').innerHTML = cards.map(([label, val]) => `
+      <div class="stat-card">
+        <div class="label">${label}</div>
+        <div class="value mono">${fmtNum(val)}</div>
+      </div>
+    `).join('');
+    renderStageChart(cards);
+  }
+
+  let stageChartInstance = null;
+  function renderStageChart(cards) {
+    if (stageChartInstance) stageChartInstance.destroy();
+    stageChartInstance = new Chart($('stageChart'), {
+      type: 'bar',
+      data: {
+        labels: cards.map(c => c[0]),
+        datasets: [{
+          data: cards.map(c => Math.round(c[1])),
+          backgroundColor: ['#2E7BA6', '#A9702B', '#2E7BA6', '#3F8F62'],
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => fmtNum(ctx.parsed.y) } },
+        },
+        scales: {
+          x: { ticks: { color: '#78766C' }, grid: { display: false } },
+          y: { ticks: { color: '#78766C' }, grid: { color: '#E3E1D8' } },
+        },
+      },
+    });
+  }
+
+  // Render 1 list dai, chi hien N dong dau, co nut "Xem tat ca / Thu gon"
+  function renderCollapsible(listId, items, renderItemFn, initialCount = 5) {
+    const container = $(listId);
+    if (!items.length) {
+      container.innerHTML = '<div class="empty">Chưa có dữ liệu</div>';
+      return;
+    }
+    let expanded = false;
+    function draw() {
+      const visible = expanded ? items : items.slice(0, initialCount);
+      let html = visible.map(renderItemFn).join('');
+      if (items.length > initialCount) {
+        html += `<div class="expand-toggle">${expanded ? 'Thu gọn ▲' : `Xem tất cả (${items.length}) ▼`}</div>`;
+      }
+      container.innerHTML = html;
+      const toggle = container.querySelector('.expand-toggle');
+      if (toggle) toggle.addEventListener('click', () => { expanded = !expanded; draw(); });
+    }
+    draw();
+  }
+
+  // Canh bao "sap het hang" de biet luc nao tat ads: so sanh ton hien tai
+  // voi toc do ban 1 thang (Sales Month). Neu ton <= sales_rate nghia la
+  // con duoi ~4 tuan hang. SKU da het hang han (stock<=0) thi bo qua,
+  // vi luc do tat ads khong con y nghia nua.
+  function renderStockAlerts(forecastRows) {
+    if (!forecastRows.length) {
+      $('stockAlertList').innerHTML = '<div class="empty">Chưa có dữ liệu forecast</div>';
+      return;
+    }
+
+    const bySku = {};
+    forecastRows.forEach(r => {
+      if (!bySku[r.part_number]) bySku[r.part_number] = r; // stock/sales_rate giong nhau ca 10 dong
+    });
+
+    const alerts = [];
+    Object.values(bySku).forEach(r => {
+      const stock = Number(r.current_stock);
+      const rate = Number(r.sales_rate);
+      if (!rate || rate <= 0) return;   // khong con nhu cau ban
+      if (!stock || stock <= 0) return; // da het hang han, khong can bao nua
+      const weeksLeft = (stock / rate) * 4.33;
+      if (weeksLeft <= 4) {
+        alerts.push({ part_number: r.part_number, product_name: r.product_name, weeksLeft, stock });
+      }
+    });
+    alerts.sort((a, b) => a.weeksLeft - b.weeksLeft);
+
+    renderCollapsible('stockAlertList', alerts, (r) => `
+      <div class="lot-card" style="border-left-color: var(--danger);">
+        <div class="lot-main">
+          <div class="lot-name">${r.product_name || r.part_number}</div>
+          <div class="lot-meta mono">${r.part_number}</div>
+        </div>
+        <div class="badge danger">${fmtNum(r.stock)} cái · ~${r.weeksLeft.toFixed(1)} tuần</div>
+      </div>
+    `, 5);
+  }
+
+  // Suggest dat hang: nhin ve chu ky 10 (cuoi cung, ~5 thang toi = dung
+  // bang lead time dat hang) - neu luc do stock du kien = 0 nghia la don
+  // dat hom nay se ve vua kip, cham hon la dut hang. QUAN TRONG: mot khi
+  // stock ve 0 phai O LUON toi het chu ky 10, khong duoc phuc hoi (tang
+  // lai) o chu ky nao giua chung - neu co phuc hoi nghia la da co lo hang
+  // khac dang ve xu ly roi, khong can suggest them nua. Chi suggest neu
+  // ban du nhieu (sales_rate x 4 thang > 100, tuc TB >25 unit/thang) vi
+  // Wayfair chi cho dat ke theo Amazon, dat le vai chuc cai khong dang.
+  function renderOrderSuggestions(forecastRows) {
+    if (!forecastRows.length) {
+      $('orderSuggestList').innerHTML = '<div class="empty">Chưa có dữ liệu forecast</div>';
+      return;
+    }
+
+    const byPartNumber = {};
+    forecastRows.forEach(r => {
+      if (!byPartNumber[r.part_number]) byPartNumber[r.part_number] = [];
+      byPartNumber[r.part_number].push(r);
+    });
+
+    const suggestions = [];
+    Object.values(byPartNumber).forEach(cycles => {
+      const sorted = [...cycles].sort((a, b) => a.cycle_index - b.cycle_index);
+      if (sorted.length < 10) return;
+
+      const lastCycle = sorted[9]; // cycle_index = 10
+      const projectedStockLast = Number(lastCycle.projected_stock);
+      if (!(projectedStockLast <= 0)) return;
+
+      // Tim chu ky dau tien ve 0, roi kiem tra TAT CA chu ky sau do (toi
+      // het cycle 10) co bi phuc hoi (tang lai > 0) khong.
+      const firstZeroIdx = sorted.findIndex(c => Number(c.projected_stock) <= 0);
+      if (firstZeroIdx === -1) return;
+      const recovered = sorted.slice(firstZeroIdx).some(c => Number(c.projected_stock) > 0);
+      if (recovered) return; // da co lo hang khac ve xu ly, khong can suggest
+
+      const salesRate = Number(lastCycle.sales_rate) || 0;
+      if (!((salesRate * 4) > 100)) return;
+
+      suggestions.push({
+        part_number: lastCycle.part_number,
+        product_name: lastCycle.product_name,
+        salesRate,
+        cycleLabel: lastCycle.cycle_label,
+      });
+    });
+
+    suggestions.sort((a, b) => b.salesRate - a.salesRate);
+
+    if (!suggestions.length) {
+      $('orderSuggestList').innerHTML = '<div class="empty">Chưa cần đặt thêm con nào</div>';
+      return;
+    }
+
+    renderCollapsible('orderSuggestList', suggestions, (r) => `
+      <div class="lot-card" style="border-left-color: #D4A24C;">
+        <div class="lot-main">
+          <div class="lot-name">${r.product_name || r.part_number}</div>
+          <div class="lot-meta mono">${r.part_number} · dự kiến hết hàng lúc ${r.cycleLabel}</div>
+        </div>
+        <div class="badge" style="background: #F5E6C8; color: #8A5A00;">TB ${fmtNum(Math.round(r.salesRate))} cái/tháng</div>
+      </div>
+    `, 5);
+  }
+
+  function renderInbound(rows) {
+    renderCollapsible('inboundList', rows, (r) => {
+      const stageClass = (r.stage || '').toLowerCase() === 'production' ? 'production' : 'shipment';
+      return `
+        <div class="lot-card ${stageClass}">
+          <div class="lot-main">
+            <div class="lot-name">${r.product_name || r.ma_tp || r.supplier_part_number}</div>
+            <div class="lot-meta mono">${r.supplier_part_number} · SL ${fmtNum(r.qty)} · ${r.active_date || '–'}</div>
+          </div>
+          <div class="badge ${stageClass}">${r.stage || '–'}</div>
+        </div>
+      `;
+    }, 5);
+  }
+
+  function renderStockBreakdown(rows, field, listId, totalId) {
+    const withStock = rows.filter(r => r[field] !== null && r[field] !== undefined && r[field] !== '');
+    const total = withStock.reduce((acc, r) => acc + (Number(r[field]) || 0), 0);
+    $(totalId).textContent = fmtNum(total);
+
+    const sorted = [...withStock].sort((a, b) => (Number(b[field]) || 0) - (Number(a[field]) || 0));
+    renderCollapsible(listId, sorted, (r) => `
+      <div class="stock-row">
+        <div class="row-name">
+          <div>${r.product_name || '–'}</div>
+          <div class="lot-meta mono">${r.supplier_part_number}</div>
+        </div>
+        <div class="num">${fmtNum(r[field])}</div>
+      </div>
+    `, 5);
+  }
+
+  // ---------------- Sales tab ----------------
+  function renderSalesChart(rows) {
+    const byMonth = {};
+    rows.forEach(r => {
+      byMonth[r.year_month] = (byMonth[r.year_month] || 0) + (Number(r.revenue) || 0);
+    });
+    const labels = Object.keys(byMonth).sort();
+    const values = labels.map(l => Math.round(byMonth[l]));
+
+    new Chart($('salesChart'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Doanh thu (USD)',
+          data: values,
+          backgroundColor: '#A9702B',
+          borderRadius: 4,
+        }],
+      },
+      plugins: [ChartDataLabels],
+      options: {
+        responsive: true,
+        layout: { padding: { top: 20 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `$${fmtNum(ctx.parsed.y)}` } },
+          datalabels: {
+            anchor: 'end',
+            align: 'top',
+            color: '#23241F',
+            font: { family: 'Roboto', weight: '600', size: 11 },
+            formatter: (value) => `$${fmtNum(value)}`,
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#78766C' }, grid: { display: false } },
+          y: { ticks: { color: '#78766C' }, grid: { color: '#E3E1D8' } },
+        },
+      },
+    });
+  }
+
+  function renderMonthSelector(rows) {
+    const months = [...new Set(rows.map(r => r.year_month))].sort().reverse();
+    const sel = $('monthSelect');
+    if (!months.length) {
+      sel.innerHTML = '<option>Chưa có data</option>';
+      return;
+    }
+    sel.innerHTML = months.map(m => `<option value="${m}">${m}</option>`).join('');
+    sel.addEventListener('change', () => renderTopSku(sel.value));
+    renderTopSku(months[0]);
+  }
+
+  function renderTopSku(month) {
+    const rows = salesRows
+      .filter(r => r.year_month === month)
+      .sort((a, b) => (Number(b.revenue) || 0) - (Number(a.revenue) || 0))
+      .slice(0, 10);
+
+    if (!rows.length) {
+      $('topSkuList').innerHTML = '<div class="empty">Không có data tháng này</div>';
+      return;
+    }
+
+    $('topSkuList').innerHTML = rows.map((r, i) => `
+      <div class="rank-row">
+        <div class="rank-idx">${i + 1}</div>
+        <div class="row-name">
+          <div>${r.product_name || r.sku}</div>
+          <div class="lot-meta mono">${r.sku}</div>
+        </div>
+        <div class="num mono">${fmtNum(r.quantity)} cái · $${fmtNum(Math.round(r.revenue))}</div>
+      </div>
+    `).join('');
+  }
+
+  // ---------------- Order tab ----------------
+  function _parseUSDate(s) {
+    // dang 'M/D/YYYY' tu sheet (dung cho PO Date...)
+    if (!s) return null;
+    const parts = s.split('/');
+    if (parts.length !== 3) return null;
+    const [m, d, y] = parts.map(Number);
+    if (!m || !d || !y) return null;
+    return new Date(y, m - 1, d);
+  }
+
+  function _parseActiveDate(s) {
+    // Active Date trong tab INBOUND dung dang 'D/M/YYYY' (khac PO Date)
+    if (!s) return null;
+    const parts = s.split('/');
+    if (parts.length !== 3) return null;
+    const [d, m, y] = parts.map(Number);
+    if (!m || !d || !y) return null;
+    return new Date(y, m - 1, d);
+  }
+
+  let orderChartInstance = null;
+  let orderDataCache = { withDate: [], nameBySku: {} };
+
+  // Hien tong quan + list SKU cho 1 ngay cu the (mac dinh = ngay gan nhat,
+  // co the doi qua date picker). Khong dung anh huong toi chart theo thang.
+  function renderOrderDaySummary(targetDate, isLatest) {
+    const { withDate, nameBySku } = orderDataCache;
+    const sameDay = (d) => d._date.toDateString() === targetDate.toDateString();
+    const dayRows = withDate.filter(sameDay);
+
+    $('orderDayTitle').textContent = isLatest ? 'Ngày gần nhất' : 'Ngày đã chọn';
+    $('orderSkuListTitle').textContent = `Đơn ngày ${targetDate.toLocaleDateString('vi-VN')} theo SKU`;
+    $('orderTotalCount').textContent = fmtNum(dayRows.length);
+    $('orderTotalRevenue').textContent = '$' + fmtNum(Math.round(dayRows.reduce((a, r) => a + (Number(r.revenue) || 0), 0)));
+    $('orderDropshipCount').textContent = fmtNum(dayRows.filter(r => r.source === 'dropship').length);
+    $('orderCastlegateCount').textContent = fmtNum(dayRows.filter(r => r.source === 'castlegate').length);
+
+    if (!dayRows.length) {
+      $('orderDayList').innerHTML = '<div class="empty">Không có đơn ngày này</div>';
+      return;
+    }
+
+    // Gom theo SKU, ten lay tu bang products (tieng Viet) thay vi Item Name
+    // trong tab Order (tieng Anh)
+    const bySku = {};
+    dayRows.forEach(r => {
+      const key = r.item_number;
+      if (!bySku[key]) {
+        bySku[key] = {
+          item_number: key,
+          product_name: nameBySku[key] || r.item_name || '–',
+          qty: 0,
+          revenue: 0,
+        };
+      }
+      bySku[key].qty += Number(r.quantity) || 0;
+      bySku[key].revenue += Number(r.revenue) || 0;
+    });
+    const skuList = Object.values(bySku).sort((a, b) => b.revenue - a.revenue);
+    $('orderDayList').innerHTML = skuList.map((r, i) => `
+      <div class="rank-row">
+        <div class="rank-idx">${i + 1}</div>
+        <div class="row-name">
+          <div>${r.product_name}</div>
+          <div class="lot-meta mono">${r.item_number}</div>
+        </div>
+        <div class="num mono">${fmtNum(r.qty)} · $${fmtNum(Math.round(r.revenue))}</div>
+      </div>
+    `).join('');
+  }
+
+  function renderOrders(rows, products) {
+    const nameBySku = {};
+    products.forEach(p => { nameBySku[p.sku] = p.product_name; });
+
+    const now = new Date();
+    const withDate = rows
+      .filter(r => r.po_date_iso)
+      .map(r => ({ ...r, _date: new Date(r.po_date_iso + 'T00:00:00') }))
+      .filter(r => r._date <= now);
+
+    if (!withDate.length) {
+      $('orderTotalCount').textContent = '–';
+      $('orderTotalRevenue').textContent = '–';
+      $('orderDropshipCount').textContent = '–';
+      $('orderCastlegateCount').textContent = '–';
+      $('orderDayList').innerHTML = '<div class="empty">Chưa có dữ liệu order</div>';
+      return;
+    }
+
+    // Ngay gan nhat co data - dung lam mac dinh cho date picker
+    const latestTime = Math.max(...withDate.map(r => r._date.getTime()));
+    const latestDate = new Date(latestTime);
+
+    orderDataCache = { withDate, nameBySku };
+    const picker = $('orderDatePicker');
+    picker.value = latestDate.toISOString().slice(0, 10);
+    picker.max = now.toISOString().slice(0, 10);
+    picker.onchange = () => {
+      if (!picker.value) return;
+      renderOrderDaySummary(new Date(picker.value + 'T00:00:00'), false);
+    };
+    renderOrderDaySummary(latestDate, true);
+
+    // Chart revenue theo ngay trong thang cua ngay gan nhat - KHONG doi theo
+    // date picker, luon bam theo thang cua ngay gan nhat nhu cu.
+    const targetMonth = latestDate.getMonth();
+    const targetYear = latestDate.getFullYear();
+    $('orderChartTitle').textContent = `Revenue theo ngày (Tháng ${targetMonth + 1}/${targetYear})`;
+    const inMonth = withDate.filter(r => r._date.getMonth() === targetMonth && r._date.getFullYear() === targetYear);
+    const byDay = {};
+    inMonth.forEach(r => {
+      const key = r._date.getDate();
+      byDay[key] = (byDay[key] || 0) + (Number(r.revenue) || 0);
+    });
+    const days = Object.keys(byDay).map(Number).sort((a, b) => a - b);
+
+    if (orderChartInstance) orderChartInstance.destroy();
+    orderChartInstance = new Chart($('orderChart'), {
+      type: 'bar',
+      data: {
+        labels: days.map(d => `${d}`),
+        datasets: [{
+          data: days.map(d => Math.round(byDay[d])),
+          backgroundColor: '#2E7BA6',
+          borderRadius: 3,
+        }],
+      },
+      plugins: [ChartDataLabels],
+      options: {
+        responsive: true,
+        layout: { padding: { top: 20 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => `$${fmtNum(ctx.parsed.y)}` } },
+          datalabels: {
+            anchor: 'end',
+            align: 'top',
+            color: '#23241F',
+            font: { family: 'Roboto', weight: '600', size: 10 },
+            formatter: (value) => `$${fmtNum(value)}`,
+          },
+        },
+        scales: {
+          x: { ticks: { color: '#78766C' }, grid: { display: false } },
+          y: { ticks: { color: '#78766C' }, grid: { color: '#E3E1D8' } },
+        },
+      },
+    });
+  }
+
+  // ---------------- Price tab ----------------
+  // Nhom chinh (category) = cot "Product Group" trong tab Ads, do Giang tu
+  // gom san (VD "Ghe nha tam" gom het cac bien the mat ngang/chan thoi/cong teak).
+  // Khi xoe ra, hien tung dong (Product Name/ASIN cu the) trong nhom do,
+  // KHONG hien ads spend rieng le (vi spend chi gan vao 1 ASIN dai dien).
+  let profitSplitChartInstance = null;
+  let revenueBreakdownChartInstance = null;
+
+  function formatMonthLabel(m) {
+    if (!m) return '';
+    const [y, mm] = m.split('-');
+    return `Tháng ${parseInt(mm, 10)}/${y}`;
+  }
+
+  function initProfitMonthPicker() {
+    const months = new Set();
+    allData.adsAll.forEach(r => { if (r.month) months.add(r.month); });
+    allData.returnsAll.forEach(r => { if (r.month) months.add(r.month); });
+    allData.freightAll.forEach(r => { if (r.month) months.add(r.month); });
+    const sortedMonths = [...months].sort().reverse(); // moi nhat truoc
+
+    const picker = $('profitMonthPicker');
+    if (!sortedMonths.length) {
+      picker.innerHTML = '<option>Chưa có data</option>';
+      renderProfitForMonth(null);
+      return;
+    }
+    picker.innerHTML = sortedMonths.map(m => `<option value="${m}">${formatMonthLabel(m)}</option>`).join('');
+    picker.value = sortedMonths[0];
+    picker.onchange = () => renderProfitForMonth(picker.value);
+    renderProfitForMonth(sortedMonths[0]);
+  }
+
+  function renderProfitForMonth(month) {
+    const adsRows = month ? allData.adsAll.filter(r => r.month === month) : [];
+    const returnRows = month ? allData.returnsAll.filter(r => r.month === month) : [];
+    const freightRows = month ? allData.freightAll.filter(r => r.month === month) : [];
+    const freightDetailRows = month ? allData.freightDetailAll.filter(r => r.month === month) : [];
+    renderProfitOverview(adsRows, returnRows, freightRows, freightDetailRows, month);
+    renderReturns(returnRows);
+  }
+
+  // ---------------- Ads tab (rieng biet, chi thuan ads metric) ----------
+  function initAdsMonthPicker() {
+    const months = new Set();
+    allData.adsAll.forEach(r => { if (r.month) months.add(r.month); });
+    const sortedMonths = [...months].sort().reverse();
+
+    const picker = $('adsMonthPicker');
+    if (!sortedMonths.length) {
+      picker.innerHTML = '<option>Chưa có data</option>';
+      renderAdsForMonth(null);
+      return;
+    }
+    picker.innerHTML = sortedMonths.map(m => `<option value="${m}">${formatMonthLabel(m)}</option>`).join('');
+    picker.value = sortedMonths[0];
+    picker.onchange = () => renderAdsForMonth(picker.value);
+    renderAdsForMonth(sortedMonths[0]);
+  }
+
+  function renderAdsForMonth(month) {
+    const rows = month ? allData.adsAll.filter(r => r.month === month) : [];
+    $('adsMonthTitle').textContent = 'Ads';
+
+    let totalSpend = 0, totalImpressions = 0, totalClicks = 0, totalAdsWsSale = 0, totalRevenue = 0;
+    const groups = {}; // product_group -> { spend, impressions, clicks, adsWsSale, revenue }
+    rows.forEach(r => {
+      const spend = Number(r.spend) || 0;
+      const impressions = Number(r.impression) || 0;
+      const clicks = Number(r.clicks) || 0;
+      const adsWsSale = Number(r.ads_ws_sale) || 0;
+      const revenue = Number(r.revenue) || 0;
+      const groupName = r.product_group || r.product_name || 'Khác';
+
+      totalSpend += spend;
+      totalImpressions += impressions;
+      totalClicks += clicks;
+      totalAdsWsSale += adsWsSale;
+      totalRevenue += revenue;
+
+      if (!groups[groupName]) groups[groupName] = { spend: 0, impressions: 0, clicks: 0, adsWsSale: 0, revenue: 0 };
+      groups[groupName].spend += spend;
+      groups[groupName].impressions += impressions;
+      groups[groupName].clicks += clicks;
+      groups[groupName].adsWsSale += adsWsSale;
+      groups[groupName].revenue += revenue;
+    });
+
+    const acos = totalAdsWsSale > 0 ? (totalSpend / totalAdsWsSale) * 100 : 0;
+    const tacos = totalRevenue > 0 ? (totalSpend / totalRevenue) * 100 : 0;
+
+    $('adsStatGrid').innerHTML = `
+      <div class="stat-card"><div class="label">Tổng Spend</div><div class="value mono">$${fmtNum(Math.round(totalSpend))}</div></div>
+      <div class="stat-card"><div class="label">Tổng Ads WS Sales</div><div class="value mono">$${fmtNum(Math.round(totalAdsWsSale))}</div></div>
+      <div class="stat-card"><div class="label">ACOS</div><div class="value mono">${acos.toFixed(0)}%</div></div>
+      <div class="stat-card"><div class="label">TACOS</div><div class="value mono">${tacos.toFixed(0)}%</div></div>
+    `;
+
+    // Chi giu nhom co spend that (bo nhom $0 - khong chay ads thang nay),
+    // sap xep TACOS tang dan (thap = hieu qua hon, len dau).
+    const groupList = Object.entries(groups)
+      .map(([name, g]) => ({ name, ...g }))
+      .filter(g => g.spend > 0)
+      .sort((a, b) => {
+        const tA = a.revenue > 0 ? a.spend / a.revenue : Infinity;
+        const tB = b.revenue > 0 ? b.spend / b.revenue : Infinity;
+        return tA - tB;
+      });
+
+    renderCollapsible('adsList', groupList, (g) => {
+      const rowAcos = g.adsWsSale > 0 ? (g.spend / g.adsWsSale) * 100 : 0;
+      const rowTacos = g.revenue > 0 ? (g.spend / g.revenue) * 100 : 0;
+      const rowCpc = g.clicks > 0 ? g.spend / g.clicks : 0;
+      const tacosColor = rowTacos <= tacos ? 'var(--ok)' : 'var(--danger)';
+      return `
+        <div class="stock-row">
+          <div class="row-name">
+            <div>${g.name}</div>
+            <div class="lot-meta mono">${fmtNum(g.impressions)} impr · ${fmtNum(g.clicks)} clicks · CPC $${rowCpc.toFixed(2)}</div>
+          </div>
+          <div class="num mono">$${fmtNum(Math.round(g.spend))} · ACOS ${rowAcos.toFixed(0)}% · TACOS <span style="color:${tacosColor}; font-weight:600;">${rowTacos.toFixed(0)}%</span></div>
+        </div>
+      `;
+    }, 10);
+  }
+
+  // ---------------- ABC Analysis (trung binh nhieu thang) ----------------
+  function _normalizePartNumberGlobal(sku) {
+    if (!sku) return '';
+    return sku.trim().toUpperCase().replace(/^WF-/, '').replace(/-WF$/, '');
+  }
+
+  // Tinh profit + units theo tung (thang, group) - dung chung logic voi
+  // renderProfitOverview de dam bao nhat quan.
+  function _computeMonthGroupStats(month) {
+    const adsRows = allData.adsAll.filter(r => r.month === month);
+    const returnRows = allData.returnsAll.filter(r => r.month === month);
+    const freightDetailRows = allData.freightDetailAll.filter(r => r.month === month);
+    const stats = {}; // group -> { revenue, spend, cogsCost, orders, returnDeduction, freightCost }
+    const tpToGroup = {};
+
+    adsRows.forEach(r => {
+      const groupName = r.product_group || r.product_name || 'Khác';
+      if (!stats[groupName]) stats[groupName] = { revenue: 0, spend: 0, cogsCost: 0, orders: 0, returnDeduction: 0, freightCost: 0 };
+      stats[groupName].revenue += Number(r.revenue) || 0;
+      stats[groupName].spend += Number(r.spend) || 0;
+      stats[groupName].cogsCost += Number(r.cogs_total) || 0;
+      stats[groupName].orders += Number(r.orders) || 0;
+      const tp = _normalizePartNumberGlobal(r.part_number_raw);
+      if (tp) tpToGroup[tp] = groupName;
+    });
+
+    returnRows.forEach(r => {
+      const tp = _normalizePartNumberGlobal(r.product_id);
+      const groupName = tpToGroup[tp];
+      if (!groupName || !stats[groupName]) return;
+      stats[groupName].returnDeduction += Number(r.total_deduction) || 0;
+    });
+
+    freightDetailRows.forEach(r => {
+      const tp = _normalizePartNumberGlobal(r.tp_code);
+      const groupName = tpToGroup[tp];
+      if (!groupName || !stats[groupName]) return;
+      stats[groupName].freightCost += Number(r.total_freight) || 0;
+    });
+
+    return stats;
+  }
+
+  function _assignTiers(list, valueKey) {
+    const sorted = [...list].sort((a, b) => b[valueKey] - a[valueKey]);
+    const total = sorted.reduce((a, x) => a + Math.max(x[valueKey], 0), 0);
+    let cumulative = 0;
+    const tierByName = {};
+    sorted.forEach(x => {
+      cumulative += Math.max(x[valueKey], 0);
+      const pct = total > 0 ? cumulative / total : 1;
+      tierByName[x.name] = pct <= 0.8 ? 'A' : pct <= 0.95 ? 'B' : 'C';
+    });
+    return tierByName;
+  }
+
+  function renderAbcAnalysis() {
+    const months = [...new Set(allData.adsAll.map(r => r.month).filter(Boolean))].sort();
+    if (!months.length) {
+      $('abcMeta').textContent = 'Chưa có dữ liệu.';
+      $('abcList').innerHTML = '';
+      return;
+    }
+
+    // Gom theo group qua tat ca cac thang, tinh trung binh
+    const groupAgg = {}; // group -> { profitSum, ordersSum, monthCount }
+    months.forEach(month => {
+      const stats = _computeMonthGroupStats(month);
+      Object.entries(stats).forEach(([name, s]) => {
+        const profit = s.revenue - s.cogsCost - s.spend - s.returnDeduction - s.freightCost;
+        if (!groupAgg[name]) groupAgg[name] = { profitSum: 0, ordersSum: 0, monthCount: 0 };
+        groupAgg[name].profitSum += profit;
+        groupAgg[name].ordersSum += s.orders;
+        groupAgg[name].monthCount += 1;
+      });
+    });
+
+    const list = Object.entries(groupAgg).map(([name, g]) => ({
+      name,
+      avgProfit: g.profitSum / g.monthCount,
+      avgOrders: g.ordersSum / g.monthCount,
+      monthCount: g.monthCount,
+    }));
+
+    const profitTiers = _assignTiers(list, 'avgProfit');
+    const orderTiers = _assignTiers(list, 'avgOrders');
+
+    list.forEach(x => {
+      const pTier = profitTiers[x.name];
+      const oTier = orderTiers[x.name];
+      x.profitTier = pTier;
+      x.orderTier = oTier;
+      if (x.avgProfit < 0) {
+        x.tier = 'C'; // dang lo thi ep xuong C, volume cao khong phai diem cong
+      } else {
+        x.tier = (pTier === 'A' && oTier === 'A') ? 'A' : (pTier === 'C' && oTier === 'C') ? 'C' : 'B';
+      }
+    });
+
+    const tierOrder = { A: 0, B: 1, C: 2 };
+    list.sort((a, b) => tierOrder[a.tier] - tierOrder[b.tier] || b.avgProfit - a.avgProfit);
+
+    $('abcMeta').textContent = `Trung bình qua ${months.length} tháng (${months.map(formatMonthLabel).join(', ')})`;
+
+    const tierColor = { A: 'var(--ok)', B: '#D4A24C', C: 'var(--danger)' };
+    $('abcList').innerHTML = list.map(x => `
+      <div class="stock-row">
+        <div class="row-name">
+          <div>${x.name}</div>
+          <div class="lot-meta mono">Profit TB $${fmtNum(Math.round(x.avgProfit))} (${x.profitTier}) · Units TB ${fmtNum(Math.round(x.avgOrders))} (${x.orderTier}) · ${x.monthCount} tháng</div>
+        </div>
+        <div class="num mono" style="color:${tierColor[x.tier]}; font-weight:700; font-size:16px;">${x.tier}</div>
+      </div>
+    `).join('');
+  }
+
+  function renderProfitOverview(adsRows, returnRows, freightRows, freightDetailRows, month) {
+    $('profitMonthTitle').textContent = 'Profit';
+
+    const totalFreight = freightRows.reduce((acc, r) => acc + (Number(r.charge_amount) || 0), 0);
+
+    function normalizePartNumber(sku) {
+      if (!sku) return '';
+      return sku.trim().toUpperCase().replace(/^WF-/, '').replace(/-WF$/, '');
+    }
+
+    let totalRevenue = 0, totalSpend = 0, totalCogs = 0, totalAdsWsSale = 0, totalOrders = 0;
+    const categories = {}; // ten group -> { revenue, spend, cogsCost, returnDeduction, items: [] } - moi item co ca sales lan return
+    const tpToGroup = {}; // TP code (khong prefix) -> ten group, de gan return vao dung group
+
+    adsRows.forEach(r => {
+      const groupName = r.product_group || r.product_name || 'Khác';
+      const cogsTotal = Number(r.cogs_total) || 0; // da nhan san voi orders trong tab Ads, khong tu nhan lai
+      const revenue = Number(r.revenue) || 0;
+      const orders = Number(r.orders) || 0;
+      const spend = Number(r.spend) || 0;
+      const adsWsSale = Number(r.ads_ws_sale) || 0;
+      const tp = normalizePartNumber(r.part_number_raw);
+
+      totalRevenue += revenue;
+      totalSpend += spend;
+      totalCogs += cogsTotal;
+      totalAdsWsSale += adsWsSale;
+      totalOrders += orders;
+
+      if (!categories[groupName]) categories[groupName] = { revenue: 0, spend: 0, cogsCost: 0, returnDeduction: 0, freightCost: 0, items: [] };
+      categories[groupName].revenue += revenue;
+      categories[groupName].spend += spend;
+      categories[groupName].cogsCost += cogsTotal;
+      categories[groupName].items.push({
+        name: r.product_name || r.asin, partNumberRaw: r.part_number_raw || '', tp, revenue, orders,
+        deductionAmount: 0, replacementCount: 0,
+      });
+
+      if (tp) tpToGroup[tp] = groupName;
+    });
+
+    // Gan return deduction thang vao dong SKU tuong ung (khong tach rieng nua).
+    // Deduction "day du" = Total Deductions Wayfair bao + chi phi gui
+    // replacement mien phi (cong ty tu ganh).
+    let totalDeduction = 0;
+    let returnUnmatchedCount = 0;
+    returnRows.forEach(r => {
+      const baseDeduction = Number(r.total_deduction) || 0;
+      const replacementCount = Number(r.replacement_count) || 0;
+
+      totalDeduction += baseDeduction;
+      const tp = normalizePartNumber(r.product_id);
+      const groupName = tpToGroup[tp] || null;
+      if (!groupName) {
+        returnUnmatchedCount++;
+        return;
+      }
+      categories[groupName].returnDeduction += baseDeduction;
+      const existingItem = categories[groupName].items.find(it => it.tp === tp);
+      if (existingItem) {
+        existingItem.deductionAmount += baseDeduction;
+        existingItem.replacementCount += replacementCount;
+      } else {
+        categories[groupName].items.push({
+          name: r.product_name || r.product_id, partNumberRaw: r.product_id, tp, revenue: 0, orders: 0,
+          deductionAmount: baseDeduction, replacementCount,
+        });
+      }
+    });
+    if (returnUnmatchedCount > 0) {
+      console.log(`[Profit] ${returnUnmatchedCount} dong return khong khop duoc SKU nao trong tab Ads thang nay (van tinh vao tong Return Deduction chung, chi khong gan duoc vao 1 dong cu the).`);
+    }
+
+    // Gan freight vao dung group qua Part Number (tu freight_detail, lay tu
+    // 2 bang con trong tab Freight - Fulfillment/Unload + Leaping Processing/Storage).
+    let freightUnmatchedCount = 0;
+    freightDetailRows.forEach(r => {
+      const freightCost = Number(r.total_freight) || 0;
+      const tp = normalizePartNumber(r.tp_code);
+      const groupName = tpToGroup[tp] || null;
+      if (!groupName) {
+        freightUnmatchedCount++;
+        return;
+      }
+      categories[groupName].freightCost += freightCost;
+    });
+    if (freightUnmatchedCount > 0) {
+      console.log(`[Profit] ${freightUnmatchedCount} dong freight_detail khong khop duoc SKU nao trong tab Ads thang nay.`);
+    }
+
+    const totalDDA = totalRevenue * 0.04; // DDA Allowance = 4% tong sales
+    const totalProfit = totalRevenue - totalCogs - totalSpend - totalDeduction - totalFreight - totalDDA;
+    const adsPct = totalRevenue > 0 ? (totalAdsWsSale / totalRevenue) * 100 : 0;
+    const organicPct = Math.max(100 - adsPct, 0);
+
+    const cards = [
+      ['Tổng WS Sales', `$${fmtNum(Math.round(totalRevenue))}`],
+      ['Tổng Ad Spend', `$${fmtNum(Math.round(totalSpend))}`],
+      ['Tổng COGS', `$${fmtNum(Math.round(totalCogs))}`],
+      ['Tổng Freight', `$${fmtNum(Math.round(totalFreight))}`],
+      ['Tổng Return Deduction', `$${fmtNum(Math.round(totalDeduction))}`],
+      ['DDA Allowance (4%)', `$${fmtNum(Math.round(totalDDA))}`],
+      ['Profit', `$${fmtNum(Math.round(totalProfit))}`],
+      ['Units Ordered', fmtNum(totalOrders)],
+    ];
+    $('profitStatGrid').innerHTML = cards.map(([label, val], i) => `
+      <div class="stat-card">
+        <div class="label">${label}</div>
+        <div class="value mono${i === 6 && totalProfit < 0 ? ' neg' : ''}">${val}</div>
+        ${i === 4 ? `<div class="stat-card-link" id="return-jump-link">Chi tiết →</div>` : ''}
+      </div>
+    `).join('');
+
+    const jumpLink = document.getElementById('return-jump-link');
+    if (jumpLink) {
+      jumpLink.addEventListener('click', () => {
+        $('returnModalOverlay').classList.add('open');
+      });
+    }
+
+    if (revenueBreakdownChartInstance) revenueBreakdownChartInstance.destroy();
+    const revBreakdownTotal = Math.max(totalCogs, 0) + Math.max(totalSpend, 0) + Math.max(totalDeduction, 0) + Math.max(totalFreight, 0) + Math.max(totalDDA, 0) + Math.max(totalProfit, 0);
+    revenueBreakdownChartInstance = new Chart($('revenueBreakdownChart'), {
+      type: 'pie',
+      data: {
+        labels: ['COGS', 'Ad Spend', 'Return', 'Freight', 'DDA', 'Profit'],
+        datasets: [{
+          data: [Math.max(totalCogs, 0), Math.max(totalSpend, 0), Math.max(totalDeduction, 0), Math.max(totalFreight, 0), Math.max(totalDDA, 0), Math.max(totalProfit, 0)],
+          backgroundColor: ['#5B7FBD', '#E0895A', '#C24E3A', '#8E6BAF', '#D4A24C', '#4CAF87'],
+          borderWidth: 0,
+        }],
+      },
+      plugins: [ChartDataLabels],
+      options: {
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#78766C', font: { family: 'Roboto Mono', size: 11 } } },
+          tooltip: { callbacks: { label: (ctx) => `$${fmtNum(Math.round(ctx.parsed))}` } },
+          datalabels: {
+            color: '#fff',
+            font: { family: 'Roboto', weight: '600', size: 12 },
+            formatter: (value) => revBreakdownTotal > 0 ? `${Math.round((value / revBreakdownTotal) * 100)}%` : '',
+          },
+        },
+      },
+    });
+
+    if (profitSplitChartInstance) profitSplitChartInstance.destroy();
+    profitSplitChartInstance = new Chart($('profitSplitChart'), {
+      type: 'doughnut',
+      data: {
+        labels: ['Ads', 'Organic'],
+        datasets: [{ data: [adsPct, organicPct], backgroundColor: ['#E0895A', '#4CAF87'], borderWidth: 0 }],
+      },
+      plugins: [ChartDataLabels],
+      options: {
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#78766C', font: { family: 'Roboto Mono', size: 11 } } },
+          datalabels: {
+            color: '#fff',
+            font: { family: 'Roboto', weight: '600', size: 12 },
+            formatter: (value) => `${Math.round(value)}%`,
+          },
+        },
+      },
+    });
+
+    const catList = Object.entries(categories).map(([name, c]) => ({
+      name, ...c, profit: c.revenue - c.cogsCost - c.spend - c.returnDeduction - c.freightCost,
+    })).sort((a, b) => b.profit - a.profit);
+
+    lastProfitData = {
+      month, totalRevenue, totalSpend, totalCogs, totalDeduction, totalFreight, totalDDA, totalProfit, catList,
+    };
+
+    $('profitList').innerHTML = catList.map((c, i) => {
+      const items = [...c.items].sort((a, b) => b.revenue - a.revenue);
+      return `
+        <div class="category-block" id="cat-block-${i}">
+          <div class="category-header" data-idx="${i}">
+            <div class="row-name">
+              <div><span class="category-arrow">▶</span>${c.name}</div>
+              <div class="lot-meta mono">Rev $${fmtNum(Math.round(c.revenue))} · Ads $${fmtNum(Math.round(c.spend))} · COGS $${fmtNum(Math.round(c.cogsCost))} · Freight $${fmtNum(Math.round(c.freightCost))} · Return $${fmtNum(Math.round(c.returnDeduction))}</div>
+            </div>
+            <div class="num mono${c.profit < 0 ? ' neg' : ''}">$${fmtNum(Math.round(c.profit))}</div>
+          </div>
+          <div class="category-sub">
+            ${items.map(it => `
+              <div class="stock-row">
+                <div class="row-name">
+                  <div>${it.name}</div>
+                  <div class="lot-meta mono">${it.partNumberRaw || ''}</div>
+                </div>
+                <div class="num">${fmtNum(it.orders)} đơn · $${fmtNum(Math.round(it.revenue))}${it.deductionAmount ? ` · <span style="color:var(--danger);">Deduction $${fmtNum(Math.round(it.deductionAmount))}</span>` : ''}${it.replacementCount ? ` · <span style="color:var(--ink-dim);">Replacement ${fmtNum(it.replacementCount)}</span>` : ''}</div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    document.querySelectorAll('.category-header').forEach(h => {
+      h.addEventListener('click', () => {
+        document.getElementById(`cat-block-${h.dataset.idx}`).classList.toggle('open');
+      });
+    });
+  }
+
+  // ---------------- Return tab ----------------
+  // Deduction "day du" = Total Deductions Wayfair tu bao + chi phi gui hang
+  // thay the mien phi (replacement_count x base_cost), vi khoan nay Wayfair
+  // KHONG tinh vao Total Deductions - la chi phi cong ty tu ganh rieng.
+  function computeEffectiveDeduction(returnRow) {
+    // Total Deductions Wayfair bao cao da bao gom chi phi replacement roi,
+    // khong tu cong them nua.
+    return Number(returnRow.total_deduction) || 0;
+  }
+
+  function renderReturns(rows) {
+    const month = rows.find(r => r.month)?.month;
+    $('returnMonthTitle').textContent = month ? `Return tháng ${month}` : 'Return';
+
+    let totalCount = 0, totalDeduction = 0;
+    const list = rows.map(r => {
+      const count = (Number(r.incidents_number) || 0) + (Number(r.remorse_number) || 0) + (Number(r.replacement_count) || 0);
+      const deduction = computeEffectiveDeduction(r);
+      totalCount += count;
+      totalDeduction += deduction;
+      return { name: r.product_name || r.product_id, part_number: r.product_id, count, deduction };
+    }).sort((a, b) => b.count - a.count);
+
+    $('returnHeaderMeta').textContent = `${fmtNum(totalCount)} return · $${fmtNum(Math.round(totalDeduction))} bị trừ (đã gồm chi phí replacement)`;
+
+    renderCollapsible('returnList', list, (r) => `
+      <div class="rank-row" style="grid-template-columns: 24px 1fr auto;">
+        <div></div>
+        <div class="row-name">
+          <div>${r.name}</div>
+          <div class="lot-meta mono">${r.part_number}</div>
+        </div>
+        <div class="num mono">${fmtNum(r.count)} · $${fmtNum(Math.round(r.deduction))}</div>
+      </div>
+    `, 8);
+  }
+
+  loadDashboard();
+
+  $('aiFab').addEventListener('click', () => {
+    $('aiModal').classList.toggle('open');
+    if ($('aiModal').classList.contains('open') && !chatHistory.length) {
+      appendChatMessage('assistant', 'Chào e, hỏi t gì cũng được — tồn kho, doanh số, profit, ads... t sẽ tra data thật rồi trả lời.');
+    }
+  });
+  $('aiModalClose').addEventListener('click', () => $('aiModal').classList.remove('open'));
+  $('returnModalClose').addEventListener('click', () => $('returnModalOverlay').classList.remove('open'));
+  $('returnModalOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'returnModalOverlay') $('returnModalOverlay').classList.remove('open');
+  });
+  $('skuModalClose').addEventListener('click', () => $('skuModalOverlay').classList.remove('open'));
+  $('skuModalOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'skuModalOverlay') $('skuModalOverlay').classList.remove('open');
+  });
+
+  // ---------------- SKU search ----------------
+  const searchInput = $('skuSearchInput');
+  const searchResults = $('skuSearchResults');
+
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    if (!q) { searchResults.classList.remove('open'); return; }
+    const matches = allData.products.filter(p =>
+      (p.sku || '').toLowerCase().includes(q) || (p.product_name || '').toLowerCase().includes(q)
+    ).slice(0, 8);
+    if (!matches.length) {
+      searchResults.innerHTML = '<div class="search-result-row">Không tìm thấy</div>';
+    } else {
+      searchResults.innerHTML = matches.map(p => `
+        <div class="search-result-row" data-sku="${p.sku}">
+          <div>${p.product_name || '–'}</div>
+          <div class="lot-meta mono">${p.sku}</div>
+        </div>
+      `).join('');
+      searchResults.querySelectorAll('.search-result-row[data-sku]').forEach(el => {
+        el.addEventListener('click', () => {
+          openSkuDetail(el.dataset.sku);
+          searchResults.classList.remove('open');
+          searchInput.value = '';
+        });
+      });
+    }
+    searchResults.classList.add('open');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.search-wrap')) searchResults.classList.remove('open');
+  });
+
+  // ---------------- Export ----------------
+  function exportExcel() {
+    if (!lastProfitData) return;
+    const d = lastProfitData;
+    const summarySheet = XLSX.utils.aoa_to_sheet([
+      ['Profit Report', d.month || ''],
+      [],
+      ['Tổng WS Sales', Math.round(d.totalRevenue)],
+      ['Tổng Ad Spend', Math.round(d.totalSpend)],
+      ['Tổng COGS', Math.round(d.totalCogs)],
+      ['Tổng Freight', Math.round(d.totalFreight)],
+      ['Tổng Return Deduction', Math.round(d.totalDeduction)],
+      ['DDA Allowance (4%)', Math.round(d.totalDDA)],
+      ['Profit', Math.round(d.totalProfit)],
+    ]);
+    const catRows = [['Nhóm sản phẩm', 'Revenue', 'Ad Spend', 'COGS', 'Profit']];
+    d.catList.forEach(c => {
+      catRows.push([c.name, Math.round(c.revenue), Math.round(c.spend), Math.round(c.cogsCost), Math.round(c.profit)]);
+    });
+    const catSheet = XLSX.utils.aoa_to_sheet(catRows);
+
+    const detailRows = [['Nhóm sản phẩm', 'Sản phẩm', 'ASIN', 'Số đơn', 'Revenue']];
+    d.catList.forEach(c => {
+      c.items.forEach(it => {
+        detailRows.push([c.name, it.name, it.asin || '', it.orders, Math.round(it.revenue)]);
+      });
+    });
+    const detailSheet = XLSX.utils.aoa_to_sheet(detailRows);
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, summarySheet, 'Tổng quan');
+    XLSX.utils.book_append_sheet(wb, catSheet, 'Theo nhóm sản phẩm');
+    XLSX.utils.book_append_sheet(wb, detailSheet, 'Chi tiết SKU + ASIN');
+    XLSX.writeFile(wb, `profit-report-${d.month || 'export'}.xlsx`);
+  }
+
+  function exportPdf() {
+    window.print();
+  }
+
+  $('exportExcelBtn').addEventListener('click', exportExcel);
+  $('exportPdfBtn').addEventListener('click', exportPdf);
+
+  function openSkuDetail(sku) {
+    const product = allData.products.find(p => p.sku === sku);
+    if (!product) return;
+    $('skuModalTitle').textContent = product.product_name || sku;
+
+    const stock = allData.stock.find(s => s.supplier_part_number === sku);
+    const price = allData.pricing.find(p => p.supplier_part_number === sku);
+    const fc = allData.forecast.filter(f => f.part_number === sku).sort((a, b) => a.cycle_index - b.cycle_index);
+    const skuSales = allData.sales.filter(s => s.sku === sku).sort((a, b) => a.year_month.localeCompare(b.year_month)).slice(-3);
+    const inboundRows = allData.inbound.filter(i => i.supplier_part_number === sku);
+    const onTheSea = inboundRows
+      .filter(r => (r.stage || '').toUpperCase() === 'SHIPMENT')
+      .reduce((acc, r) => acc + (Number(r.qty) || 0), 0);
+    const inProduction = inboundRows
+      .filter(r => (r.stage || '').toUpperCase() === 'PRODUCTION')
+      .reduce((acc, r) => acc + (Number(r.qty) || 0), 0);
+    const adsRow = allData.ads.find(a => a.asin === product.asin);
+    const stockoutCycle = fc.find(c => Number(c.projected_stock) <= 0);
+
+    const now = new Date();
+    const activeDates = inboundRows
+      .map(r => ({ raw: r.active_date, parsed: _parseActiveDate(r.active_date) }))
+      .filter(d => d.parsed && d.parsed >= now)
+      .sort((a, b) => a.parsed - b.parsed);
+    const nearestActive = activeDates[0];
+
+    let html = `<div class="lot-meta mono" style="margin-bottom:14px;">${sku} · ASIN ${product.asin || '–'} · ${product.product_group || product.product_class || ''}</div>`;
+
+    html += `<div class="stat-grid" style="margin-bottom:16px;">
+      <div class="stat-card"><div class="label">Tồn</div><div class="value mono">${stock ? fmtNum(stock.account_stock) : '–'}</div></div>
+      <div class="stat-card"><div class="label">Trên biển</div><div class="value mono">${fmtNum(onTheSea)}</div></div>
+      <div class="stat-card"><div class="label">Đang sản xuất</div><div class="value mono">${fmtNum(inProduction)}</div></div>
+      <div class="stat-card"><div class="label">Active gần nhất</div><div class="value mono">${nearestActive ? nearestActive.raw : '–'}</div></div>
+    </div>`;
+
+    html += `<div class="lot-meta mono" style="margin-bottom:16px;">COGS: ${price && price.cogs !== null ? '$' + fmtNum(price.cogs) : '–'} · Dự báo: ${stockoutCycle ? `hết khoảng ${stockoutCycle.cycle_label}` : 'ổn định'}</div>`;
+
+    if (skuSales.length) {
+      html += `<div class="section-title" style="font-size:11px;">Doanh số gần đây</div>`;
+      html += skuSales.map(s => `
+        <div class="stock-row"><div>${s.year_month}</div><div class="num">${fmtNum(s.quantity)} cái · $${fmtNum(Math.round(s.revenue))}</div></div>
+      `).join('');
+    }
+
+    if (adsRow) {
+      html += `<div class="section-title" style="font-size:11px; margin-top:14px;">Ads tháng gần nhất</div>`;
+      html += `<div class="stock-row"><div>Revenue / Spend</div><div class="num">$${fmtNum(Math.round(adsRow.revenue || 0))} / $${fmtNum(Math.round(adsRow.spend || 0))}</div></div>`;
+    }
+
+    if (inboundRows.length) {
+      html += `<div class="section-title" style="font-size:11px; margin-top:14px;">Sản xuất / Shipment</div>`;
+      html += inboundRows.slice(0, 5).map(r => `
+        <div class="stock-row"><div>${r.stage} · ${r.active_date || '–'}</div><div class="num">${fmtNum(r.qty)}</div></div>
+      `).join('');
+    }
+
+    $('skuModalBody').innerHTML = html;
+    $('skuModalOverlay').classList.add('open');
+  }
+
+  // ---------------- AI Chat ----------------
+  let chatHistory = [];
+
+  function appendChatMessage(role, text) {
+    const div = document.createElement('div');
+    div.className = `chat-msg chat-msg-${role}`;
+    div.textContent = text;
+    $('aiChatMessages').appendChild(div);
+    $('aiChatMessages').scrollTop = $('aiChatMessages').scrollHeight;
+    return div;
+  }
+
+  async function sendChatMessage() {
+    const input = $('aiChatInput');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    appendChatMessage('user', text);
+    chatHistory.push({ role: 'user', content: text });
+
+    const loadingDiv = appendChatMessage('assistant', 'Đang trả lời...');
+    loadingDiv.classList.add('chat-loading');
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: chatHistory }),
+      });
+      const data = await res.json();
+      loadingDiv.remove();
+      if (data.error) {
+        appendChatMessage('assistant', `Lỗi: ${data.error}`);
+      } else {
+        appendChatMessage('assistant', data.reply);
+        chatHistory.push({ role: 'assistant', content: data.reply });
+      }
+    } catch (err) {
+      loadingDiv.remove();
+      appendChatMessage('assistant', `Lỗi: ${err.message}`);
+    }
+  }
+
+  $('aiChatSend').addEventListener('click', sendChatMessage);
+  $('aiChatInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') sendChatMessage();
+  });
+</script>
+</body>
+</html>
