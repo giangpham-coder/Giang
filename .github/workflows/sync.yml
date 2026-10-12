@@ -38,11 +38,14 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python sync_google_sheet.py
+      # BUOC 3: keo ton kho CastleGate (Wayfair On-Hand API) -> bang live_inventory
+      # Uu tien secret WAYFAIR_*; neu chua tao thi dung lai WF_* cua buoc 1.
+      # Supplier ID khong phai bi mat nen co gia tri mac dinh.
       - name: Sync live inventory (CastleGate)
-        run: python sync_inventory_live.py
         env:
-             WAYFAIR_CLIENT_ID: ${{ secrets.WAYFAIR_CLIENT_ID }}
-             WAYFAIR_CLIENT_SECRET: ${{ secrets.WAYFAIR_CLIENT_SECRET }}
-             WAYFAIR_SUPPLIER_ID: ${{ secrets.WAYFAIR_SUPPLIER_ID }}
-             SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-             SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          WAYFAIR_CLIENT_ID: ${{ secrets.WAYFAIR_CLIENT_ID || secrets.WF_CLIENT_ID }}
+          WAYFAIR_CLIENT_SECRET: ${{ secrets.WAYFAIR_CLIENT_SECRET || secrets.WF_CLIENT_SECRET }}
+          WAYFAIR_SUPPLIER_ID: ${{ secrets.WAYFAIR_SUPPLIER_ID || '318402' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python sync_inventory_live.py
