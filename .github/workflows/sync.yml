@@ -38,3 +38,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python sync_google_sheet.py
+      - name: Sync live inventory (CastleGate)
+        run: python sync_inventory_live.py
+        env:
+             WAYFAIR_CLIENT_ID: ${{ secrets.WAYFAIR_CLIENT_ID }}
+             WAYFAIR_CLIENT_SECRET: ${{ secrets.WAYFAIR_CLIENT_SECRET }}
+             WAYFAIR_SUPPLIER_ID: ${{ secrets.WAYFAIR_SUPPLIER_ID }}
+             SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+             SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
