@@ -3,7 +3,7 @@ sync_amazon_sheet.py - Sheet "Giang AMZ" -> Supabase (amz_inbound, amz_lots, amz
 Chay: pip install gspread google-auth supabase --break-system-packages && python sync_amazon_sheet.py
 Env: GOOGLE_SERVICE_ACCOUNT_JSON, SHEET_ID_AMZ (doan giua /d/ va /edit trong URL), SUPABASE_URL, SUPABASE_KEY
 """
-import os, time
+import os, re, time
 import gspread
 from google.oauth2.service_account import Credentials
 from supabase import create_client
@@ -111,6 +111,51 @@ def sync_stock(sh):
     return out
 
 
+ASIN_RE = re.compile(r"^[A-Z0-9]{10}$")
+
+
+# Monthly (pivot): row 2 = header, data tu row 3. B Product Name | C ASIN | D.. = thang dang MM/YY
+def sync_monthly(sh):
+    rows = rows_of(sh, "Monthly")
+    if len(rows) < 3:
+        return []
+    periods = []
+    for i, h in enumerate(rows[1]):
+        m = re.match(r"^(\d{1,2})/(\d{2,4})$", h.strip())
+        if m and i >= 3:
+            y = int(m.group(2))
+            y += 2000 if y < 100 else 0
+            periods.append((i, f"{y:04d}-{int(m.group(1)):02d}"))
+    out = []
+    for r in rows[2:]:
+        asin = c(r, 2).upper()
+        if bad(r) or not ASIN_RE.match(asin):
+            continue
+        for i, ym in periods:
+            u = num(c(r, i))
+            if u is not None:
+                out.append({"asin": asin, "product_name": c(r, 1), "year_month": ym, "units": u})
+    return out
+
+
+# SalesW (pivot theo tuan): row 2 = header, data tu row 3. B ASIN | C Product Name | D.. = ngay M/D/YYYY
+def sync_weekly(sh):
+    rows = rows_of(sh, "SalesW")
+    if len(rows) < 3:
+        return []
+    periods = [(i, iso(h)) for i, h in enumerate(rows[1]) if i >= 3 and iso(h)]
+    out = []
+    for r in rows[2:]:
+        asin = c(r, 1).upper()
+        if bad(r) or not ASIN_RE.match(asin):
+            continue
+        for i, d in periods:
+            u = num(c(r, i))
+            if u is not None:
+                out.append({"asin": asin, "product_name": c(r, 2), "week_start": d, "units": u})
+    return out
+
+
 def refresh(sb, table, records):
     if not records:
         print(f"[{table}] rong, giu nguyen du lieu cu.")
@@ -127,6 +172,8 @@ def main():
     refresh(sb, "amz_inbound", sync_inbound(sh))
     refresh(sb, "amz_lots", sync_lots(sh))
     refresh(sb, "amz_stock", sync_stock(sh))
+    refresh(sb, "amz_monthly_sales", sync_monthly(sh))
+    refresh(sb, "amz_weekly_sales", sync_weekly(sh))
 
 
 if __name__ == "__main__":
