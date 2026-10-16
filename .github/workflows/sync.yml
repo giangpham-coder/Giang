@@ -19,7 +19,7 @@ jobs:
         run: pip install gspread google-auth supabase requests python-dotenv
       - name: Write Google service account key to file
         run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' | base64 -d > service_account.json
-      # BUOC 1: keo don Wayfair API (CG + DS) cua hom qua -> tab Orders
+      # BUOC 1: keo don Wayfair API (CG + DS) cua hom qua -> tab Orders (+ luu gio dat don vao order_timestamps)
       - name: Pull Wayfair orders into Sheet
         continue-on-error: true
         env:
@@ -30,6 +30,8 @@ jobs:
           GOOGLE_SHEET_TAB: Orders
           GOOGLE_SERVICE_ACCOUNT_FILE: service_account.json
           WF_PUSH_SUPABASE: "0"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python wayfair_orders_sync.py
       # BUOC 2: sync tab Orders -> Supabase -> web
       - name: Sync Sheet to web
@@ -49,3 +51,4 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python sync_inventory_live.py
+      # Ads (product + keyword + campaign) da tach sang workflow rieng: sync_ads.yml
