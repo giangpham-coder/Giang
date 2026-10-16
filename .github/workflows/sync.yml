@@ -49,3 +49,11 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
         run: python sync_inventory_live.py
+      # BUOC 4: keo bao cao Ads (Wayfair Advertising API) -> bang ads_listing_daily
+      - name: Sync Ads (listing report)
+        env:
+          WAYFAIR_CLIENT_ID: ${{ secrets.WAYFAIR_CLIENT_ID || secrets.WF_CLIENT_ID }}
+          WAYFAIR_CLIENT_SECRET: ${{ secrets.WAYFAIR_CLIENT_SECRET || secrets.WF_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python sync_ads.py
