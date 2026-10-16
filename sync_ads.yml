@@ -1,0 +1,32 @@
+name: Sync Wayfair Ads
+
+on:
+  schedule:
+    - cron: '0 9 * * *'   # 09:00 UTC = 16:00 gio VN (ngay Pacific da ket thuc han)
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'So ngay keo lai (mac dinh 21; backfill co the 60-90)'
+        default: '21'
+
+jobs:
+  ads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install supabase requests
+      - name: Sync Ads (listing + keyword + campaign)
+        env:
+          WAYFAIR_CLIENT_ID: ${{ secrets.WAYFAIR_CLIENT_ID || secrets.WF_CLIENT_ID }}
+          WAYFAIR_CLIENT_SECRET: ${{ secrets.WAYFAIR_CLIENT_SECRET || secrets.WF_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          ADS_DAYS: ${{ github.event.inputs.days || '21' }}
+        run: python sync_ads.py
