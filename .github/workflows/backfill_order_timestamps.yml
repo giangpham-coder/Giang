@@ -1,0 +1,35 @@
+name: Backfill Order Timestamps
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: 'Tu ngay UTC (YYYY-MM-DD)'
+        default: '2026-09-01'
+      to_date:
+        description: 'Den ngay UTC (de trong = hom qua)'
+        default: ''
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install gspread google-auth requests python-dotenv
+      - name: Backfill order_timestamps
+        env:
+          WF_ENV: production
+          WF_CLIENT_ID: ${{ secrets.WF_CLIENT_ID }}
+          WF_CLIENT_SECRET: ${{ secrets.WF_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_KEY }}
+          BACKFILL_FROM: ${{ github.event.inputs.from_date }}
+          BACKFILL_TO: ${{ github.event.inputs.to_date }}
+        run: python backfill_order_timestamps.py
