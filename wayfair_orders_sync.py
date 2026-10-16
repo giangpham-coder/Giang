@@ -24,6 +24,7 @@ import sys
 import json
 import time
 import datetime as dt
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 
 import requests
@@ -55,6 +56,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 SUPABASE_TABLE = os.getenv("SUPABASE_TABLE", "daily_orders")
 PUSH_SUPABASE = os.getenv("WF_PUSH_SUPABASE", "1") == "1"
+# Luu them gio dat don (UTC) + ngay ET/Pacific vao bang order_timestamps (de tinh TACOS theo ngay Pacific).
+# Chi them, khong dong gi toi Sheet/daily_orders. Loi o day KHONG lam hong buoc pull.
+PUSH_TIMESTAMPS = os.getenv("WF_PUSH_TIMESTAMPS", "1") == "1"
+TS_TABLE = "order_timestamps"
+TZ_ET = ZoneInfo("America/New_York")
+TZ_PT = ZoneInfo("America/Los_Angeles")
 
 if ENV == "production":
     GRAPHQL_URL = "https://api.wayfair.com/v1/graphql"
@@ -477,6 +484,53 @@ def safe_fetch(token: str, root_field: str, start: dt.datetime, end: dt.datetime
         raise
 
 
+def timestamp_rows(pos: list[dict], source: str) -> list[dict]:
+    """Moi PO -> 1 dong (po_number, gio UTC day du, ngay UTC / ET / Pacific)."""
+    out = []
+    for po in pos:
+        d = _parse_dt(po.get("poDate"))        # naive UTC
+        if d is None or not po.get("poNumber"):
+            continue
+        aware = d.replace(tzinfo=dt.timezone.utc)
+        out.append({
+            "po_number": str(po["poNumber"]),
+            "source": source,
+            "po_datetime_utc": aware.isoformat(),
+            "po_date_utc": aware.date().isoformat(),
+            "po_date_et": aware.astimezone(TZ_ET).date().isoformat(),
+            "po_date_pt": aware.astimezone(TZ_PT).date().isoformat(),
+        })
+    return out
+
+
+def push_timestamps(rows: list[dict]) -> None:
+    """Upsert order_timestamps qua REST (khong dung supabase-py de khoi them thu vien)."""
+    if not PUSH_TIMESTAMPS:
+        print("[timestamps] WF_PUSH_TIMESTAMPS=0 -> bo qua")
+        return
+    if not rows:
+        return
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print("[timestamps] thieu SUPABASE_URL / SUPABASE_SERVICE_KEY -> bo qua")
+        return
+    headers = {
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+    }
+    try:
+        for i in range(0, len(rows), 500):
+            r = requests.post(f"{SUPABASE_URL}/rest/v1/{TS_TABLE}?on_conflict=po_number",
+                              headers=headers, json=rows[i:i + 500], timeout=60)
+            if r.status_code >= 300:
+                print(f"[timestamps] loi {r.status_code}: {r.text[:300]}")
+                return
+        print(f"[timestamps] upsert {len(rows)} PO vao {TS_TABLE}")
+    except Exception as e:   # khong de loi o day lam hong buoc pull
+        print(f"[timestamps] loi: {type(e).__name__}: {e}")
+
+
 def main() -> None:
     start, end = target_window()
     print(f"[run] env={ENV} | lay don UTC ngay {start.date()} (khung [{start} , {end}))")
@@ -485,6 +539,8 @@ def main() -> None:
     cg = safe_fetch(token, "getCastleGatePurchaseOrders", start, end)
     time.sleep(3.0)
     ds = safe_fetch(token, "getDropshipPurchaseOrders", start, end)
+
+    push_timestamps(timestamp_rows(cg, "castlegate") + timestamp_rows(ds, "dropship"))
 
     rows = to_rows(cg, "castlegate") + to_rows(ds, "dropship")
     print(f"[flatten] tong {len(rows)} line items")
